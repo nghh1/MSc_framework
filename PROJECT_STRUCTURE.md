@@ -42,7 +42,7 @@ reconstructed framework. The framework itself is:
 │   │       └── sequences.py
 │   ├── reporting/
 │   │   ├── __init__.py
-│   │   └── visualize.py
+│   │   └── visualise.py
 │   ├── rl/
 │   │   ├── __init__.py
 │   │   ├── core.py
@@ -153,7 +153,7 @@ baselines, while `independent_a2c` is the direct “GARL without sharing” abla
 
 | File | Function |
 |---|---|
-| `reporting/visualize.py` | Builds the original reporting suite from saved tidy artifacts: portfolio overview, final-holdout/fold uncertainty, regime heatmap, equity curves, turnover comparison, and cost-sensitivity replay. |
+| `reporting/visualise.py` | Builds the original reporting suite from saved tidy artifacts: portfolio overview, final-holdout/fold uncertainty, regime heatmap, equity curves, turnover comparison, and cost-sensitivity replay. |
 
 The headline summary uses final-holdout results when the holdout is enabled. Without a final
 holdout, repetitions are averaged within each fold before fold-level confidence intervals are
