@@ -8,19 +8,19 @@ Group-Agent Reinforcement Learning (GARL) with:
   Temporal Fusion Transformer (TFT);
 - one joint agent controlling all stocks with A2C, PPO, or DQN;
 - independent per-stock agents using A2C, PPO, or DQN;
-- Group-Agent Reinforcement Learning (GARL) with DDAL gradient sharing; and
+- Group-Agent Reinforcement Learning (GARL) with synchronous DDAL gradient sharing; and
 - equal-weight buy-and-hold.
 
 ## Research lineage
 
 GARL means **Group-Agent Reinforcement Learning** and follows the framework proposed by
-Wu and Zeng in their University of Manchester paper. The GARL experiment is intentionally
+Wu and Zeng in the University of Manchester paper. The GARL experiment is intentionally
 restricted to the A2C-based DDAL mechanism so its comparison with independent A2C agents
 isolates gradient sharing. PPO and DQN are additional non-GARL RL baselines; they are not
 presented as GARL variants.
 
-TCN always refers to **Temporal Convolutional Network**. TFT always refers to
-**Temporal Fusion Transformer**; this repository uses a compact TFT-style implementation
+TCN refers to **Temporal Convolutional Network**. TFT refers to **Temporal Fusion Transformer**; 
+this repository uses a simplified compact TFT implementation
 with variable gating, recurrent encoding, causal attention, and a point-forecast head.
 
 The primary research contract is **portfolio-to-portfolio comparison**. Every method emits a
@@ -46,8 +46,8 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 
-# Reduced real-data run
-garl-trading run --config configs/default.toml --quick
+# Real-data run
+garl-trading run --config configs/default.toml
 
 # Build the report again from an existing run
 garl-trading report --run-dir artifacts/<run-id>
@@ -58,7 +58,7 @@ pytest
 All experiments use downloaded Yahoo Finance data. The normalized price snapshot is cached and
 hashed so later reporting does not silently use revised market data.
 
-## Artifact layout
+## Expect artifact layout
 
 ```text
 artifacts/<run-id>/
