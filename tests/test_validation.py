@@ -13,7 +13,7 @@ def test_walk_forward_is_purged_capped_and_has_untouched_holdout():
         max_train_bars=700,
         embargo=2,
         holdout_start=str(index[2500].date()),
-        use_holdout=True,
+        use_holdout=True
     )
     assert len(folds) == 4
     assert holdout is not None

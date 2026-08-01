@@ -1,4 +1,4 @@
-from .visualize import build_report
+from .visualise import build_report
 
 __all__ = ["build_report"]
 

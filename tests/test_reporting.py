@@ -1,7 +1,5 @@
-
 import pandas as pd
-
-from garl_trading.reporting.visualize import _summary
+from garl_trading.reporting.visualise import summary
 
 
 def test_summary_reports_seed_and_fold_uncertainty():
@@ -18,9 +16,9 @@ def test_summary_reports_seed_and_fold_uncertainty():
             "gross_exposure": [1.0] * 4,
             "fold": [0, 1, 0, 1],
             "fold_kind": ["walk_forward"] * 4,
-            "repetition": [0] * 4,
+            "repetition": [0] * 4
         }
     )
-    summary = _summary(metrics, 0.95)
+    summary = summary(metrics, 0.95)
     assert set(summary["baseline"]) == {"A", "B"}
     assert (summary["sharpe_ci"] > 0).all()

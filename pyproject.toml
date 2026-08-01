@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "garl-trading"
 version = "0.1.0"
-description = "Leakage-aware framework for comparing GARL with statistical, supervised, RL, and passive trading baselines."
+description = "Machine Learning framework for comparing GARL with statistical, supervised, RL, and passive trading baselines."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

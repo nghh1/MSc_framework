@@ -31,13 +31,14 @@ supervised = ["arimax_static", "arimax_rolling", "random_forest", "lstm", "tcn",
 rl = [
   "single_a2c", "single_ppo", "single_dqn",
   "independent_a2c", "independent_ppo", "independent_dqn",
-  "garl_ddal",
+  "garl_ddal"
 ]
 lookback = 20
 train_epochs = 100
 rollout_length = 32
 learning_rate = 0.0003
 gamma = 0.95
+device = "mps"
 
 [tuning]
 enabled = true

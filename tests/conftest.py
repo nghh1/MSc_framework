@@ -1,15 +1,8 @@
 from __future__ import annotations
-
 import numpy as np
 import pandas as pd
 
-
-def market_fixture(
-    tickers: tuple[str, ...] = ("AAA",),
-    *,
-    periods: int = 760,
-    seed: int = 42,
-) -> dict[str, pd.DataFrame]:
+def market_fixture(tickers: tuple[str, ...] = ("AAA",), periods: int = 760, seed: int = 42) -> dict[str, pd.DataFrame]:
     """Deterministic in-memory OHLCV fixture; never exposed as a data provider."""
     dates = pd.bdate_range("2018-01-01", periods=periods)
     master = np.random.default_rng(seed)
@@ -29,7 +22,7 @@ def market_fixture(
                 "close": close,
                 "volume": rng.lognormal(np.log(5_000_000), 0.3, periods),
             },
-            index=dates,
+            index=dates
         )
     return result
 

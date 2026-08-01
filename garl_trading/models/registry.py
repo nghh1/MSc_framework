@@ -1,14 +1,7 @@
 from __future__ import annotations
-
 from .base import ForecastModel
-from .supervised import (
-    LSTMForecaster,
-    RandomForestForecaster,
-    RollingARIMAX,
-    StaticARIMAX,
-    TCNForecaster,
-    TFTForecaster,
-)
+from .supervised import StaticARIMAX, RollingARIMAX, RandomForestForecaster, LSTMForecaster, \
+                        TCNForecaster,TFTForecaster
 
 
 def create_forecaster(name: str, *, seed: int = 42, **params) -> ForecastModel:

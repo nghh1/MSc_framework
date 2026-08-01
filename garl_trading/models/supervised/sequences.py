@@ -5,20 +5,13 @@ import pandas as pd
 import torch
 from sklearn.preprocessing import StandardScaler
 from torch import nn
-
 from ..base import ForecastModel, ModelContext
 
 
-class _LSTMNet(nn.Module):
+class LSTM_custom(nn.Module):
     def __init__(self, n_features: int, hidden: int, layers: int, dropout: float):
         super().__init__()
-        self.encoder = nn.LSTM(
-            n_features,
-            hidden,
-            num_layers=layers,
-            batch_first=True,
-            dropout=dropout if layers > 1 else 0,
-        )
+        self.encoder = nn.LSTM(n_features, hidden, num_layers=layers, batch_first=True, dropout=dropout if layers > 1 else 0)
         self.head = nn.Sequential(nn.Linear(hidden, hidden // 2), nn.ReLU(), nn.Linear(hidden // 2, 1))
 
     def forward(self, x):
@@ -26,7 +19,7 @@ class _LSTMNet(nn.Module):
         return self.head(hidden[-1]).squeeze(-1)
 
 
-class _TCNNet(nn.Module):
+class TCN_custom(nn.Module):
     def __init__(self, n_features: int, hidden: int, dropout: float):
         super().__init__()
         self.network = nn.Sequential(
@@ -45,7 +38,7 @@ class _TCNNet(nn.Module):
         return self.head(y[:, :, -1]).squeeze(-1)
 
 
-class _TFTLiteNet(nn.Module):
+class TFT_custom(nn.Module):
     def __init__(self, n_features: int, hidden: int, heads: int, dropout: float):
         super().__init__()
         self.feature_gate = nn.Sequential(nn.Linear(n_features, n_features), nn.Softmax(dim=-1))
@@ -65,20 +58,11 @@ class _TFTLiteNet(nn.Module):
 
 
 class TorchSequenceForecaster(ForecastModel):
-    architecture = "lstm"
+    architecture = "lstm" # default
 
-    def __init__(
-        self,
-        lookback: int = 20,
-        hidden: int = 32,
-        layers: int = 1,
-        heads: int = 4,
-        dropout: float = 0.1,
-        epochs: int = 20,
-        learning_rate: float = 1e-3,
-        seed: int = 42,
-        device: str | None = None,
-    ) -> None:
+    def __init__(self, lookback: int = 20, hidden: int = 32, layers: int = 1, heads: int = 4, 
+                 dropout: float = 0.1, epochs: int = 20, learning_rate: float = 1e-3, seed: int = 42, 
+                 device: str | None = None) -> None:
         super().__init__()
         self.lookback = lookback
         self.hidden = hidden
@@ -94,17 +78,15 @@ class TorchSequenceForecaster(ForecastModel):
         self.columns: list[str] = []
         self.history = pd.DataFrame()
 
-    def _network(self, n_features: int) -> nn.Module:
+    def network(self, n_features: int) -> nn.Module:
         if self.architecture == "lstm":
-            return _LSTMNet(n_features, self.hidden, self.layers, self.dropout)
+            return LSTM_custom(n_features, self.hidden, self.layers, self.dropout)
         if self.architecture == "tcn":
-            return _TCNNet(n_features, self.hidden, self.dropout)
-        return _TFTLiteNet(n_features, self.hidden, self.heads, self.dropout)
+            return TCN_custom(n_features, self.hidden, self.dropout)
+        return TFT_custom(n_features, self.hidden, self.heads, self.dropout)
 
-    def _windows(self, values: np.ndarray, targets: np.ndarray | None = None):
-        x = np.stack(
-            [values[i - self.lookback + 1:i + 1] for i in range(self.lookback - 1, len(values))]
-        )
+    def windows(self, values: np.ndarray, targets: np.ndarray | None = None):
+        x = np.stack([values[i - self.lookback + 1:i + 1] for i in range(self.lookback - 1, len(values))])
         if targets is None:
             return x
         return x, targets[self.lookback - 1:]
@@ -115,10 +97,10 @@ class TorchSequenceForecaster(ForecastModel):
         x, y = features.loc[valid], targets.loc[valid]
         self.columns = list(x.columns)
         scaled = self.scaler.fit_transform(x)
-        xw, yw = self._windows(scaled, y.to_numpy(dtype=np.float32))
+        xw, yw = self.windows(scaled, y.to_numpy(dtype=np.float32))
         if len(xw) < 20:
             raise ValueError("Insufficient sequence windows.")
-        self.model = self._network(len(self.columns)).to(self.device)
+        self.model = self.network(len(self.columns)).to(self.device)
         optimizer = torch.optim.Adam(self.model.parameters(), lr=self.learning_rate)
         x_tensor = torch.tensor(xw, dtype=torch.float32, device=self.device)
         y_tensor = torch.tensor(yw, dtype=torch.float32, device=self.device)
@@ -134,17 +116,12 @@ class TorchSequenceForecaster(ForecastModel):
                 optimizer.step()
         self.model.eval()
         self.history = x.tail(self.lookback - 1)
-        self._set_signal_scale(y)
+        self.set_signal_scale(y)
         return self
 
     @torch.no_grad()
-    def predict_returns(
-        self,
-        features: pd.DataFrame,
-        *,
-        context: ModelContext | None = None,
-        realized_targets: pd.Series | None = None,
-    ) -> pd.Series:
+    def predict_returns(self, features: pd.DataFrame, context: ModelContext | None = None, 
+                        realised_targets: pd.Series | None = None) -> pd.Series:
         if self.model is None:
             raise RuntimeError("Model is not fitted.")
         history = context.features if context is not None else self.history
@@ -161,7 +138,7 @@ class TorchSequenceForecaster(ForecastModel):
             window = torch.tensor(
                 scaled[i - self.lookback + 1:i + 1],
                 dtype=torch.float32,
-                device=self.device,
+                device=self.device
             ).unsqueeze(0)
             predictions[date] = float(self.model(window).item())
         return pd.Series(predictions).reindex(features.index)
@@ -173,11 +150,9 @@ class LSTMForecaster(TorchSequenceForecaster):
 
 class TCNForecaster(TorchSequenceForecaster):
     """Temporal Convolutional Network return forecaster."""
-
     architecture = "tcn"
 
 
 class TFTForecaster(TorchSequenceForecaster):
-    """Compact Temporal Fusion Transformer-style return forecaster."""
-
+    """Compact Simplified Temporal Fusion Transformer return forecaster."""
     architecture = "tft"

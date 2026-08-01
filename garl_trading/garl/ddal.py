@@ -1,27 +1,20 @@
-"""A2C-based DDAL implementation for Group-Agent Reinforcement Learning.
-
-This module reconstructs the GARL mechanism proposed by Wu and Zeng in their University of
-Manchester paper. PPO and DQN live only in the non-GARL RL baseline modules.
+"""
+A2C-based DDAL implementation for Group-Agent Reinforcement Learning.
+This module reconstructs the GARL mechanism proposed by Wu and Zeng. 
+PPO and DQN algorithm live only in the non-GARL RL baseline modules.
 """
 
 from __future__ import annotations
-
 from copy import deepcopy
 from dataclasses import dataclass
-
 import numpy as np
 import pandas as pd
 import torch
 
-from garl_trading.rl.core import (
-    ActorCritic,
-    a2c_gradient,
-    apply_gradient,
-    fit_feature_scalers,
-    make_states,
-)
+from garl_trading.rl.core import ActorCritic, a2c_gradient, apply_gradient, \
+    fit_feature_scalers, make_states
 from garl_trading.rl.trainers import RLPolicySet
-
+from garl_trading.utils import resolve_torch_device
 
 @dataclass(frozen=True)
 class GradientPiece:
@@ -31,7 +24,7 @@ class GradientPiece:
     relevance: float
 
 
-def _weighted_average(pieces: list[GradientPiece]) -> list[torch.Tensor]:
+def weighted_average(pieces: list[GradientPiece]) -> list[torch.Tensor]:
     experience = np.asarray([piece.epoch + 1 for piece in pieces], dtype=float)
     relevance = np.asarray([piece.relevance for piece in pieces], dtype=float)
     weights = 0.5 * experience / experience.sum() + 0.5 * relevance / relevance.sum()
@@ -44,7 +37,6 @@ def _weighted_average(pieces: list[GradientPiece]) -> list[torch.Tensor]:
 def train_garl_ddal(
     features: dict[str, pd.DataFrame],
     closes: dict[str, pd.Series],
-    *,
     levels: tuple[float, ...],
     lookback: int,
     epochs: int,
@@ -53,16 +45,18 @@ def train_garl_ddal(
     gamma: float,
     cost_rate: float,
     seed: int,
-    device: str = "cpu",
+    device: str = "auto",
     share_after_fraction: float = 0.3,
     share_every: int = 4,
-    pool_size: int | None = None,
+    pool_size: int | None = None
 ) -> RLPolicySet:
-    """Synchronous DDAL simulation with aligned model initialization.
+    """
+    Synchronous DDAL simulation with aligned model initialisation.
 
     Every agent starts from the same parameter state. Gradient pieces are merged by generation
     epoch, and each sharing update includes the receiver's own latest gradient.
     """
+    device = resolve_torch_device(device)
     tickers = tuple(features)
     scalers = fit_feature_scalers(features)
     states = make_states(
@@ -92,7 +86,7 @@ def train_garl_ddal(
                 states[ticker],
                 rollout_length=rollout_length,
                 gamma=gamma,
-                rng=randoms[ticker],
+                rng=randoms[ticker]
             )
             pieces[ticker] = GradientPiece(gradient, ticker, epoch, 1.0)
 
@@ -118,6 +112,6 @@ def train_garl_ddal(
             chosen = [own]
             chosen.extend(piece for piece in candidates if piece.source != ticker)
             chosen = chosen[:pool_size]
-            apply_gradient(models[ticker], optimizers[ticker], _weighted_average(chosen))
+            apply_gradient(models[ticker], optimizers[ticker], weighted_average(chosen))
             pending[ticker].clear()
     return RLPolicySet("garl", models, scalers, tickers, levels, lookback)

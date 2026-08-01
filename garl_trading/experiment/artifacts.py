@@ -1,16 +1,11 @@
 from __future__ import annotations
-
-import hashlib
 import json
 import shutil
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
-
 import pandas as pd
-
 from garl_trading.config import FrameworkConfig
-
 
 class ArtifactStore:
     def __init__(self, root: str | Path, experiment_name: str) -> None:
@@ -24,20 +19,12 @@ class ArtifactStore:
         self.equity: list[pd.DataFrame] = []
         self.failures: list[dict] = []
 
-    def initialize(
-        self,
-        config: FrameworkConfig,
-        config_path: str | Path,
-        *,
-        data_fingerprint: str,
-    ) -> None:
+    def initialise(self, config: FrameworkConfig, config_path: str | Path) -> None:
         shutil.copy2(config_path, self.path / "config.toml")
         manifest = {
             "run_id": self.run_id,
             "created_at": datetime.now(UTC).isoformat(),
-            "data_sha256": data_fingerprint,
-            "config_sha256": hashlib.sha256(Path(config_path).read_bytes()).hexdigest(),
-            "config": asdict(config),
+            "config": asdict(config)
         }
         (self.path / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
@@ -51,14 +38,7 @@ class ArtifactStore:
             long_frames.append(item)
         pd.concat(long_frames, ignore_index=True).to_csv(data_dir / "prices.csv", index=False)
 
-    def add_result(
-        self,
-        *,
-        metadata: dict,
-        metrics: dict,
-        positions: pd.DataFrame,
-        equity: pd.Series,
-    ) -> None:
+    def add_result(self, metadata: dict, metrics: dict, positions: pd.DataFrame, equity: pd.Series) -> None:
         self.metrics.append({**metadata, **metrics})
         position_frame = positions.stack().rename("position").reset_index()
         position_frame.columns = ["date", "ticker", "position"]

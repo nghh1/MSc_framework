@@ -15,7 +15,7 @@ def test_future_price_change_does_not_modify_past_features():
     modified = build_features(changed)
     pd.testing.assert_frame_equal(
         original.iloc[:boundary].loc[:, FEATURE_COLUMNS],
-        modified.iloc[:boundary].loc[:, FEATURE_COLUMNS],
+        modified.iloc[:boundary].loc[:, FEATURE_COLUMNS]
     )
 
 

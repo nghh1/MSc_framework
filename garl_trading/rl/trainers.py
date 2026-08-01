@@ -1,22 +1,13 @@
 from __future__ import annotations
-
 from dataclasses import dataclass
-
 import numpy as np
 import pandas as pd
 import torch
+from torch import nn
 from sklearn.preprocessing import StandardScaler
 
-from .core import (
-    ActorCritic,
-    JointActorCritic,
-    a2c_gradient,
-    apply_gradient,
-    fit_feature_scalers,
-    greedy_asset_positions,
-    make_states,
-)
-
+from .core import ActorCritic, JointActorCritic, a2c_gradient, apply_gradient,\
+                  fit_feature_scalers, greedy_asset_positions, make_states
 
 @dataclass
 class RLPolicySet:
@@ -27,47 +18,24 @@ class RLPolicySet:
     levels: tuple[float, ...]
     lookback: int
 
-    def positions(
-        self,
-        features: dict[str, pd.DataFrame],
-        *,
-        context: dict[str, pd.DataFrame],
-    ) -> pd.DataFrame:
+    def positions(self, features: dict[str, pd.DataFrame], context: dict[str, pd.DataFrame]) -> pd.DataFrame:
         if self.kind == "joint":
-            return _joint_positions(self, features, context)
+            return joint_positions(self, features, context)
         series = {
-            ticker: greedy_asset_positions(
-                self.models[ticker],
-                self.scalers[ticker],
-                features[ticker],
-                context=context[ticker],
-                levels=self.levels,
-                lookback=self.lookback,
-            )
+            ticker: greedy_asset_positions(self.models[ticker], self.scalers[ticker], features[ticker], 
+                                           context[ticker], self.levels, self.lookback)
             for ticker in self.tickers
         }
         return pd.DataFrame(series).reindex(features[self.tickers[0]].index)
 
 
-def train_independent_a2c(
-    features: dict[str, pd.DataFrame],
-    closes: dict[str, pd.Series],
-    *,
-    levels: tuple[float, ...],
-    lookback: int,
-    epochs: int,
-    rollout_length: int,
-    learning_rate: float,
-    gamma: float,
-    cost_rate: float,
-    seed: int,
-    device: str = "cpu",
-) -> RLPolicySet:
+def train_independent_a2c(features: dict[str, pd.DataFrame], closes: dict[str, pd.Series], 
+                          levels: tuple[float, ...], lookback: int, epochs: int, rollout_length: int, 
+                          learning_rate: float, gamma: float, cost_rate: float, seed: int, 
+                          device: str = "auto") -> RLPolicySet:
     tickers = tuple(features)
     scalers = fit_feature_scalers(features)
-    states = make_states(
-        features, closes, scalers, levels=levels, lookback=lookback, cost_rate=cost_rate
-    )
+    states = make_states(features, closes, scalers, levels=levels, lookback=lookback, cost_rate=cost_rate)
     models, optimizers, randoms = {}, {}, {}
     for i, ticker in enumerate(tickers):
         torch.manual_seed(seed + i)
@@ -77,36 +45,18 @@ def train_independent_a2c(
         randoms[ticker] = np.random.default_rng(seed + i)
     for _ in range(epochs):
         for ticker in tickers:
-            gradients, _ = a2c_gradient(
-                models[ticker],
-                states[ticker],
-                rollout_length=rollout_length,
-                gamma=gamma,
-                rng=randoms[ticker],
-            )
+            gradients, _ = a2c_gradient(models[ticker], states[ticker], rollout_length=rollout_length, 
+                                        gamma=gamma, rng=randoms[ticker])
             apply_gradient(models[ticker], optimizers[ticker], gradients)
     return RLPolicySet("independent", models, scalers, tickers, levels, lookback)
 
 
-def train_joint_a2c(
-    features: dict[str, pd.DataFrame],
-    closes: dict[str, pd.Series],
-    *,
-    levels: tuple[float, ...],
-    lookback: int,
-    epochs: int,
-    rollout_length: int,
-    learning_rate: float,
-    gamma: float,
-    cost_rate: float,
-    seed: int,
-    device: str = "cpu",
-) -> RLPolicySet:
+def train_joint_a2c(features: dict[str, pd.DataFrame], closes: dict[str, pd.Series], levels: tuple[float, ...], 
+                    lookback: int, epochs: int, rollout_length: int, learning_rate: float, gamma: float, 
+                    cost_rate: float, seed: int, device: str = "auto") -> RLPolicySet:
     tickers = tuple(features)
     scalers = fit_feature_scalers(features)
-    states = make_states(
-        features, closes, scalers, levels=levels, lookback=lookback, cost_rate=cost_rate
-    )
+    states = make_states(features, closes, scalers, levels, lookback, cost_rate)
     per_asset_size = features[tickers[0]].shape[1] * lookback + 1
     torch.manual_seed(seed)
     model = JointActorCritic(per_asset_size, len(tickers), len(levels)).to(device)
@@ -149,11 +99,7 @@ def train_joint_a2c(
         log_probs = torch.log_softmax(logits, dim=-1)
         chosen = log_probs.gather(2, action_tensor[..., None]).squeeze(-1).sum(axis=1)
         entropy = -(torch.softmax(logits, dim=-1) * log_probs).sum(axis=-1).mean()
-        loss = (
-            -(chosen * advantage.detach()).mean()
-            + 0.5 * nn.functional.mse_loss(values, return_tensor)
-            - 0.01 * entropy
-        )
+        loss = -(chosen * advantage.detach()).mean() + 0.5 * nn.functional.mse_loss(values, return_tensor) - 0.01 * entropy
         optimizer.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -162,19 +108,13 @@ def train_joint_a2c(
 
 
 @torch.no_grad()
-def _joint_positions(
-    policy: RLPolicySet,
-    features: dict[str, pd.DataFrame],
-    context: dict[str, pd.DataFrame],
-) -> pd.DataFrame:
+def joint_positions(policy: RLPolicySet, features: dict[str, pd.DataFrame], context: dict[str, pd.DataFrame]) -> pd.DataFrame:
     model = policy.models
     device = next(model.parameters()).device
     combined, locations, values = {}, {}, {}
     for ticker in policy.tickers:
         combined[ticker] = pd.concat([context[ticker], features[ticker]])
-        combined[ticker] = combined[ticker].loc[
-            ~combined[ticker].index.duplicated(keep="last")
-        ].sort_index()
+        combined[ticker] = combined[ticker].loc[~combined[ticker].index.duplicated(keep="last")].sort_index()
         locations[ticker] = {date: i for i, date in enumerate(combined[ticker].index)}
         values[ticker] = policy.scalers[ticker].transform(combined[ticker]).astype(np.float32)
     current = {ticker: 0.0 for ticker in policy.tickers}
@@ -201,6 +141,3 @@ def _joint_positions(
             row[ticker] = current[ticker]
         rows.append(row)
     return pd.DataFrame(rows, index=index)
-
-
-from torch import nn  # imported after definitions to keep public surface compact

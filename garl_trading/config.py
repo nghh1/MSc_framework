@@ -18,9 +18,7 @@ class ExperimentConfig:
 class DataConfig:
     start: str = "2001-01-01"
     end: str = "2025-12-31"
-    tickers: tuple[str, ...] = (
-        "NVDA", "AAPL", "MSFT", "JPM", "BAC", "MS", "CAT", "RTX", "BA"
-    )
+    tickers: tuple[str, ...] = ("NVDA", "AAPL", "MSFT", "JPM", "BAC", "MS", "CAT", "RTX", "BA")
     adjust_prices: bool = True
 
 
@@ -37,7 +35,7 @@ class ValidationConfig:
 
 @dataclass(frozen=True)
 class ExecutionConfig:
-    initial_capital: float = 100_000.0
+    initial_capital: float = 100000.0
     transaction_cost_bps: float = 5.0
     slippage_bps: float = 2.0
     short_borrow_bps_annual: float = 0.0
@@ -46,8 +44,14 @@ class ExecutionConfig:
 
 @dataclass(frozen=True)
 class ModelsConfig:
+    device: str = "auto"
     supervised: tuple[str, ...] = (
-        "arimax_static", "arimax_rolling", "random_forest", "lstm", "tcn", "tft"
+        "arimax_static", 
+        "arimax_rolling", 
+        "random_forest", 
+        "lstm", 
+        "tcn", 
+        "tft"
     )
     rl: tuple[str, ...] = (
         "single_a2c",
@@ -98,23 +102,25 @@ class FrameworkConfig:
             raise ValueError("max_train_bars must be >= min_train_bars.")
         if self.experiment.repetitions < 1:
             raise ValueError("repetitions must be positive.")
+        if not (self.models.device in {"auto", "cpu", "mps", "cuda"}):
+            raise ValueError("models.device must be auto, cpu, mps, cuda, or cuda:<index>.")
         levels = self.execution.position_levels
         if not levels or min(levels) < -1 or max(levels) > 1:
             raise ValueError("Position levels must lie in [-1, 1].")
 
 
-_SECTIONS: dict[str, type] = {
+SECTIONS: dict[str, type] = {
     "experiment": ExperimentConfig,
     "data": DataConfig,
     "validation": ValidationConfig,
     "execution": ExecutionConfig,
     "models": ModelsConfig,
     "tuning": TuningConfig,
-    "reporting": ReportingConfig,
+    "reporting": ReportingConfig
 }
 
 
-def _coerce(section_cls: type, values: dict[str, Any]):
+def coerce(section_cls: type, values: dict[str, Any]):
     normalized = {
         key: tuple(value) if isinstance(value, list) else value
         for key, value in values.items()
@@ -125,10 +131,7 @@ def _coerce(section_cls: type, values: dict[str, Any]):
 def load_config(path: str | Path = "configs/default.toml") -> FrameworkConfig:
     with Path(path).open("rb") as handle:
         raw = tomllib.load(handle)
-    sections = {
-        name: _coerce(cls, raw.get(name, {}))
-        for name, cls in _SECTIONS.items()
-    }
+    sections = {name: coerce(cls, raw.get(name, {})) for name, cls in SECTIONS.items()}
     config = FrameworkConfig(**sections)
     config.validate()
     return config

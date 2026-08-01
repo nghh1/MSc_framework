@@ -2,12 +2,7 @@ from conftest import market_fixture
 
 from garl_trading.data import build_dataset
 from garl_trading.data.features import FEATURE_COLUMNS
-from garl_trading.rl import (
-    train_independent_dqn,
-    train_independent_ppo,
-    train_joint_dqn,
-    train_joint_ppo,
-)
+from garl_trading.rl import train_independent_dqn, train_independent_ppo, train_joint_dqn, train_joint_ppo
 
 
 def test_ppo_and_dqn_joint_and_independent_policies_emit_position_matrices():
@@ -37,14 +32,9 @@ def test_ppo_and_dqn_joint_and_independent_policies_emit_position_matrices():
         "learning_rate": 3e-4,
         "gamma": 0.95,
         "cost_rate": 0.0007,
-        "seed": 4,
+        "seed": 4
     }
-    for trainer in (
-        train_joint_ppo,
-        train_independent_ppo,
-        train_joint_dqn,
-        train_independent_dqn,
-    ):
+    for trainer in (train_joint_ppo, train_independent_ppo, train_joint_dqn, train_independent_dqn):
         policy = trainer(train_features, train_closes, **common)
         positions = policy.positions(test_features, context=context)
         assert positions.shape == (5, 2)
