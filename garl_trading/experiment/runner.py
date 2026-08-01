@@ -1,6 +1,8 @@
 from __future__ import annotations
+
 import logging
 from pathlib import Path
+
 import numpy as np
 import pandas as pd
 
@@ -10,13 +12,21 @@ from garl_trading.data import build_dataset, load_market_data
 from garl_trading.data.features import FEATURE_COLUMNS
 from garl_trading.garl import train_garl_ddal
 from garl_trading.models import ModelContext, create_forecaster
-from garl_trading.rl import train_independent_a2c, train_independent_dqn, train_independent_ppo, \
-                            train_joint_a2c, train_joint_dqn, train_joint_ppo
+from garl_trading.rl import (
+    train_independent_a2c,
+    train_independent_dqn,
+    train_independent_ppo,
+    train_joint_a2c,
+    train_joint_dqn,
+    train_joint_ppo,
+)
 from garl_trading.tuning import tune_forecaster, tune_rl_policy
 from garl_trading.validation import nested_folds, outer_folds
+
 from .artifacts import ArtifactStore
 
 LOGGER = logging.getLogger(__name__)
+
 
 class ExperimentRunner:
     def __init__(self, config: FrameworkConfig, config_path: str | Path) -> None:
@@ -25,42 +35,49 @@ class ExperimentRunner:
         self.rl_parameters: dict[tuple[str, int], dict] = {}
 
     def run(self) -> Path:
-            cfg = self.config
-            tickers = cfg.data.tickers
-            raw = load_market_data(tickers, cfg.data.start, cfg.data.end, adjust_prices=cfg.data.adjust_prices)
-            dataset = build_dataset(raw)
-            min_train = min(cfg.validation.min_train_bars, max(252, len(dataset.index) // 3))
-            folds, holdout = outer_folds(
-                dataset.index,
-                n_folds=cfg.validation.outer_folds,
-                min_train_bars=min_train,
-                max_train_bars=cfg.validation.max_train_bars,
-                embargo=cfg.validation.embargo_bars,
-                holdout_start=cfg.validation.final_holdout_start,
-                use_holdout=cfg.validation.use_final_holdout
-            )
-            evaluation_folds = folds + ([holdout] if holdout is not None else [])
-            store = ArtifactStore(cfg.experiment.artifacts_dir, cfg.experiment.name)
-            store.initialise(cfg, self.config_path)
-            store.save_market_data(dataset.prices)
-    
-            supervised = cfg.models.supervised
-            rl_names = cfg.models.rl
-            repetitions = cfg.experiment.repetitions
-    
-            for fold in evaluation_folds:
-                self.run_buy_hold(dataset, fold, store)
-                for name in supervised:
-                    self.run_supervised(name, dataset, fold, store)
-                for name in rl_names:
-                    for repetition in range(repetitions):
-                        seed = cfg.experiment.seed + repetition
-                        self.run_rl(name, dataset, fold, repetition, seed, store)
-                store.flush()
-    
-            from garl_trading.reporting.visualise import build_report
-            build_report(store.path, confidence=cfg.reporting.confidence_level)
-            return store.path
+        cfg = self.config
+        tickers = cfg.data.tickers
+        raw = load_market_data(
+            tickers, cfg.data.start, cfg.data.end, adjust_prices=cfg.data.adjust_prices
+        )
+        dataset = build_dataset(raw)
+        min_train = min(cfg.validation.min_train_bars, max(252, len(dataset.index) // 3))
+        folds, holdout = outer_folds(
+            dataset.index,
+            n_folds=cfg.validation.outer_folds,
+            min_train_bars=min_train,
+            max_train_bars=cfg.validation.max_train_bars,
+            embargo=cfg.validation.embargo_bars,
+            holdout_start=cfg.validation.final_holdout_start,
+            use_holdout=cfg.validation.use_final_holdout,
+        )
+        evaluation_folds = folds + ([holdout] if holdout is not None else [])
+        store = ArtifactStore(cfg.experiment.artifacts_dir, cfg.experiment.name)
+        store.initialise(cfg, self.config_path)
+        store.save_market_data(dataset.prices)
+
+        supervised = cfg.models.supervised
+        rl_names = cfg.models.rl
+        repetitions = cfg.experiment.repetitions
+
+        for fold in evaluation_folds:
+            self.run_buy_hold(dataset, fold, store)
+            for name in supervised:
+                self.run_supervised(name, dataset, fold, store)
+            for name in rl_names:
+                for repetition in range(repetitions):
+                    seed = cfg.experiment.seed + repetition
+                    self.run_rl(name, dataset, fold, repetition, seed, store)
+            store.flush()
+
+        from garl_trading.reporting.visualise import build_report
+
+        build_report(
+            store.path,
+            confidence=cfg.reporting.confidence_level,
+            formats=cfg.reporting.formats,
+        )
+        return store.path
 
     def frames(self, dataset, positions):
         features = {
@@ -68,8 +85,7 @@ class ExperimentRunner:
             for ticker in dataset.tickers
         }
         closes = {
-            ticker: dataset.prices[ticker]["close"].iloc[positions]
-            for ticker in dataset.tickers
+            ticker: dataset.prices[ticker]["close"].iloc[positions] for ticker in dataset.tickers
         }
         return features, closes
 
@@ -77,11 +93,12 @@ class ExperimentRunner:
         cfg = self.config.execution
         close_frame = pd.DataFrame(closes)
         return run_portfolio(
-            close_frame, positions,
+            close_frame,
+            positions,
             initial_capital=cfg.initial_capital,
             transaction_cost_bps=cfg.transaction_cost_bps,
             slippage_bps=cfg.slippage_bps,
-            short_borrow_bps_annual=cfg.short_borrow_bps_annual
+            short_borrow_bps_annual=cfg.short_borrow_bps_annual,
         )
 
     def metadata(self, name, fold, repetition, seed):
@@ -91,8 +108,10 @@ class ExperimentRunner:
             "fold_kind": fold.kind,
             "repetition": repetition,
             "seed": seed,
+            "train_start": fold.train_start,
+            "train_end": fold.train_end,
             "test_start": fold.test_start,
-            "test_end": fold.test_end
+            "test_end": fold.test_end,
         }
 
     def run_buy_hold(self, dataset, fold, store):
@@ -103,12 +122,16 @@ class ExperimentRunner:
             metadata=self.metadata("buy_and_hold", fold, 0, self.config.experiment.seed),
             metrics=result.metrics,
             positions=positions,
-            equity=result.equity
+            equity=result.equity,
+            returns=result.returns,
+            gross_returns=result.gross_returns,
+            costs=result.costs,
+            turnover=result.turnover,
         )
 
     def run_supervised(self, name, dataset, fold, store):
         cfg = self.config
-        train_features, train_closes = self.frames(dataset, fold.train)
+        train_features, _ = self.frames(dataset, fold.train)
         test_features, test_closes = self.frames(dataset, fold.test)
         context_positions = np.arange(
             max(0, int(fold.test[0]) - cfg.models.lookback + 1), int(fold.test[0])
@@ -124,9 +147,11 @@ class ExperimentRunner:
                         fold.train,
                         dataset.index,
                         n_folds=cfg.validation.inner_folds,
-                        min_train_bars=min(cfg.validation.min_train_bars, max(126, len(fold.train) // 3)),
+                        min_train_bars=min(
+                            cfg.validation.min_train_bars, max(126, len(fold.train) // 3)
+                        ),
                         max_train_bars=cfg.validation.max_train_bars,
-                        embargo=cfg.validation.embargo_bars
+                        embargo=cfg.validation.embargo_bars,
                     )
                     parameters = tune_forecaster(
                         name,
@@ -138,7 +163,8 @@ class ExperimentRunner:
                         seed=cfg.experiment.seed,
                         initial_capital=cfg.execution.initial_capital / len(dataset.tickers),
                         transaction_cost_bps=cfg.execution.transaction_cost_bps,
-                        slippage_bps=cfg.execution.slippage_bps
+                        slippage_bps=cfg.execution.slippage_bps,
+                        objective_metric=cfg.tuning.objective,
                     )
                 if name in {"lstm", "tcn", "tft"}:
                     parameters.setdefault("lookback", cfg.models.lookback)
@@ -146,14 +172,11 @@ class ExperimentRunner:
 
                 model = create_forecaster(name, seed=cfg.experiment.seed, **parameters)
                 model.fit(train_features[ticker], targets.iloc[fold.train])
-                context = ModelContext(
-                    context_features[ticker],
-                    targets.iloc[context_positions]
-                )
+                context = ModelContext(context_features[ticker], targets.iloc[context_positions])
                 position_columns[ticker] = model.predict_positions(
                     test_features[ticker],
                     context=context,
-                    realized_targets=targets.iloc[fold.test]
+                    realised_targets=targets.iloc[fold.test],
                 )
             positions = pd.DataFrame(position_columns).reindex(dataset.index[fold.test])
             result = self.backtest(test_closes, positions)
@@ -161,16 +184,15 @@ class ExperimentRunner:
                 metadata=self.metadata(name, fold, 0, cfg.experiment.seed),
                 metrics=result.metrics,
                 positions=positions,
-                equity=result.equity
+                equity=result.equity,
+                returns=result.returns,
+                gross_returns=result.gross_returns,
+                costs=result.costs,
+                turnover=result.turnover,
             )
         except Exception as exc:
             LOGGER.exception("%s failed on fold %s", name, fold.number)
-            store.add_failure(
-                baseline=name,
-                fold=fold.number,
-                repetition=0,
-                error=repr(exc)
-            )
+            store.add_failure(baseline=name, fold=fold.number, repetition=0, error=repr(exc))
 
     def run_rl(self, name, dataset, fold, repetition, seed, store):
         cfg = self.config
@@ -189,15 +211,15 @@ class ExperimentRunner:
             "gamma": cfg.models.gamma,
             "cost_rate": (cfg.execution.transaction_cost_bps + cfg.execution.slippage_bps) / 10000,
             "seed": seed,
-            "device": cfg.models.device
+            "device": cfg.models.device,
         }
         try:
             tuning_key = (name, fold.number)
             if cfg.tuning.enabled:
                 if tuning_key not in self.rl_parameters:
                     self.rl_parameters[tuning_key] = tune_rl_policy(
-                        name, 
-                        train_features, 
+                        name,
+                        train_features,
                         train_closes,
                         trials=cfg.tuning.rl_trials,
                         seed=cfg.experiment.seed,
@@ -211,7 +233,8 @@ class ExperimentRunner:
                         transaction_cost_bps=cfg.execution.transaction_cost_bps,
                         slippage_bps=cfg.execution.slippage_bps,
                         embargo_bars=cfg.validation.embargo_bars,
-                        device=cfg.models.device
+                        device=cfg.models.device,
+                        objective_metric=cfg.tuning.objective,
                     )
                 common.update(self.rl_parameters[tuning_key])
             if name == "single_a2c":
@@ -236,14 +259,14 @@ class ExperimentRunner:
                 metadata=self.metadata(name, fold, repetition, seed),
                 metrics=result.metrics,
                 positions=positions,
-                equity=result.equity
+                equity=result.equity,
+                returns=result.returns,
+                gross_returns=result.gross_returns,
+                costs=result.costs,
+                turnover=result.turnover,
             )
         except Exception as exc:
             LOGGER.exception("%s failed on fold %s seed %s", name, fold.number, seed)
             store.add_failure(
-                baseline=name,
-                fold=fold.number,
-                repetition=repetition,
-                seed=seed,
-                error=repr(exc)
+                baseline=name, fold=fold.number, repetition=repetition, seed=seed, error=repr(exc)
             )

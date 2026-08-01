@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import argparse
 import logging
 from pathlib import Path
@@ -30,6 +31,7 @@ def main(argv: list[str] | None = None) -> None:
         from .reporting.visualise import build_report
 
         build_report(Path(args.run_dir), confidence=args.confidence)
+
 
 if __name__ == "__main__":
     main()

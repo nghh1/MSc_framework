@@ -1,12 +1,17 @@
 from __future__ import annotations
+
 import warnings
+
 import numpy as np
 import pandas as pd
 from statsmodels.tsa.arima.model import ARIMA
+
 from ..base import ForecastModel, ModelContext
+
 
 def effective_trend(d: int, trend: str) -> str:
     return "n" if d > 0 and trend == "c" else trend
+
 
 class StaticARIMAX(ForecastModel):
     def __init__(self, p: int = 1, d: int = 0, q: int = 1, trend: str = "c") -> None:
@@ -23,14 +28,22 @@ class StaticARIMAX(ForecastModel):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             self.result = ARIMA(
-                y.to_numpy(), exog=x.to_numpy(), order=self.order,
-                trend=self.trend, enforce_stationarity=False, enforce_invertibility=False
+                y.to_numpy(),
+                exog=x.to_numpy(),
+                order=self.order,
+                trend=self.trend,
+                enforce_stationarity=False,
+                enforce_invertibility=False,
             ).fit()
         self.set_signal_scale(y)
         return self
 
-    def predict_returns(self, features: pd.DataFrame, context: ModelContext | None = None, 
-                        realised_targets: pd.Series | None = None) -> pd.Series:
+    def predict_returns(
+        self,
+        features: pd.DataFrame,
+        context: ModelContext | None = None,
+        realised_targets: pd.Series | None = None,
+    ) -> pd.Series:
         if self.result is None:
             raise RuntimeError("Model is not fitted.")
         x = features.loc[:, self.columns].fillna(0.0)
@@ -41,8 +54,15 @@ class StaticARIMAX(ForecastModel):
 class RollingARIMAX(ForecastModel):
     """Causal rolling ARIMAX with identical update behavior in tuning and testing."""
 
-    def __init__(self, p: int = 1, d: int = 0, q: int = 1, 
-                 trend: str = "c", window: int = 252, refit_every: int = 10) -> None:
+    def __init__(
+        self,
+        p: int = 1,
+        d: int = 0,
+        q: int = 1,
+        trend: str = "c",
+        window: int = 252,
+        refit_every: int = 10,
+    ) -> None:
         super().__init__()
         self.order = (p, d, q)
         self.trend = effective_trend(d, trend)
@@ -60,18 +80,20 @@ class RollingARIMAX(ForecastModel):
         self.set_signal_scale(self.history_y)
         return self
 
-    def predict_returns(self, features: pd.DataFrame, context: ModelContext | None = None, 
-                        realised_targets: pd.Series | None = None) -> pd.Series:
+    def predict_returns(
+        self,
+        features: pd.DataFrame,
+        context: ModelContext | None = None,
+        realised_targets: pd.Series | None = None,
+    ) -> pd.Series:
         x_history = self.history_x.copy()
         y_history = self.history_y.copy()
         if context is not None and context.realised_targets is not None:
-            context_valid = (
-                context.features.notna().all(axis=1) & context.realised_targets.notna()
-            )
-            x_history = pd.concat(
-                [x_history, context.features.loc[context_valid, self.columns]]
-            )
+            context_valid = context.features.notna().all(axis=1) & context.realised_targets.notna()
+            x_history = pd.concat([x_history, context.features.loc[context_valid, self.columns]])
             y_history = pd.concat([y_history, context.realised_targets.loc[context_valid]])
+            x_history = x_history.loc[~x_history.index.duplicated(keep="last")].sort_index()
+            y_history = y_history.loc[~y_history.index.duplicated(keep="last")].sort_index()
 
         x_test = features.loc[:, self.columns].fillna(0.0)
         observed = realised_targets.reindex(x_test.index) if realised_targets is not None else None
@@ -97,4 +119,3 @@ class RollingARIMAX(ForecastModel):
             forecast = fitted.get_forecast(steps=1, exog=x_test.loc[[date]].to_numpy())
             predictions[date] = float(np.asarray(forecast.predicted_mean)[0])
         return pd.Series(predictions).reindex(x_test.index)
-

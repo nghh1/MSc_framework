@@ -8,7 +8,7 @@ Group-Agent Reinforcement Learning (GARL) with:
   Temporal Fusion Transformer (TFT);
 - one joint agent controlling all stocks with A2C, PPO, or DQN;
 - independent per-stock agents using A2C, PPO, or DQN;
-- Group-Agent Reinforcement Learning (GARL) with synchronous DDAL gradient sharing; and
+- Group-Agent Reinforcement Learning (GARL) with deterministic DDAL-style gradient sharing; and
 - equal-weight buy-and-hold.
 
 ## Research lineage
@@ -19,7 +19,7 @@ restricted to the A2C-based DDAL mechanism so its comparison with independent A2
 isolates gradient sharing. PPO and DQN are additional non-GARL RL baselines; they are not
 presented as GARL variants.
 
-TCN refers to **Temporal Convolutional Network**. TFT refers to **Temporal Fusion Transformer**; 
+TCN refers to **Temporal Convolutional Network**. TFT refers to **Temporal Fusion Transformer**;
 this repository uses a simplified compact TFT implementation
 with variable gating, recurrent encoding, causal attention, and a point-forecast head.
 
@@ -36,7 +36,10 @@ applies one-bar delayed execution, trading costs, slippage, and optional short-b
 - RL methods are evaluated across repeated seeds.
 - GARL agents start from an aligned parameter state before gradients are shared.
 - Buy-and-hold is produced in the same experiment run from the same price snapshot.
-- Results, positions, equity curves, configuration, and data hashes are written to `artifacts/`.
+- ADX(14) and ROC(20) extend the causal indicators without duplicating the existing ROC(10), which
+  is already represented by `ret_10`.
+- Results, daily net/gross returns and costs, positions, equity curves, configuration, and data
+  hashes are written to `artifacts/`.
 - Reporting is independent from training and consumes tidy artifact tables.
 
 ## Quick start
@@ -55,6 +58,11 @@ garl-trading report --run-dir artifacts/<run-id>
 pytest
 ```
 
+See [the model rationale](docs/MODEL_RATIONALE.md),
+[reporting rationale](docs/REPORTING_RATIONALE.md), and [full runbook](docs/RUNBOOK.md) before the
+dissertation run. The GARL implementation is a controlled single-process emulation of DDAL's
+gradient-sharing mechanism, not a wall-clock asynchronous distributed deployment.
+
 All experiments use downloaded Yahoo Finance data. The normalized price snapshot is cached and
 hashed so later reporting does not silently use revised market data.
 
@@ -68,11 +76,22 @@ artifacts/<run-id>/
   metrics.csv
   positions.csv
   equity.csv
+  daily_returns.csv
   failures.csv
   report/
-    overview.png
+    data_split_timeline.png
+    cumulative_returns_net.png
+    sharpe_ranking.png
+    sharpe_over_time.png
     fold_stability.png
+    return_vs_drawdown.png
+    turnover.png
     cost_sensitivity.png
+    crash_period_cumulative_returns.png
+    performance_comparison.csv
+    performance_comparison.md
+    sharpe_over_time.csv
+    sharpe_over_time.md
     summary.md
 ```
 

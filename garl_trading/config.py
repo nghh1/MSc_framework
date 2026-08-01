@@ -46,12 +46,12 @@ class ExecutionConfig:
 class ModelsConfig:
     device: str = "auto"
     supervised: tuple[str, ...] = (
-        "arimax_static", 
-        "arimax_rolling", 
-        "random_forest", 
-        "lstm", 
-        "tcn", 
-        "tft"
+        "arimax_static",
+        "arimax_rolling",
+        "random_forest",
+        "lstm",
+        "tcn",
+        "tft",
     )
     rl: tuple[str, ...] = (
         "single_a2c",
@@ -102,11 +102,35 @@ class FrameworkConfig:
             raise ValueError("max_train_bars must be >= min_train_bars.")
         if self.experiment.repetitions < 1:
             raise ValueError("repetitions must be positive.")
-        if not (self.models.device in {"auto", "cpu", "mps", "cuda"}):
+        if self.models.lookback < 2 or self.models.train_epochs < 1:
+            raise ValueError("lookback must be >= 2 and train_epochs must be positive.")
+        if self.models.rollout_length < 2 or not 0 < self.models.gamma <= 1:
+            raise ValueError("rollout_length must be >= 2 and gamma must lie in (0, 1].")
+        if self.models.learning_rate <= 0:
+            raise ValueError("learning_rate must be positive.")
+        if any(
+            value < 0
+            for value in (
+                self.execution.transaction_cost_bps,
+                self.execution.slippage_bps,
+                self.execution.short_borrow_bps_annual,
+            )
+        ):
+            raise ValueError("Execution costs cannot be negative.")
+        valid_device = self.models.device in {"auto", "cpu", "mps", "cuda"}
+        valid_device |= (
+            self.models.device.startswith("cuda:")
+            and self.models.device.removeprefix("cuda:").isdigit()
+        )
+        if not valid_device:
             raise ValueError("models.device must be auto, cpu, mps, cuda, or cuda:<index>.")
         levels = self.execution.position_levels
         if not levels or min(levels) < -1 or max(levels) > 1:
             raise ValueError("Position levels must lie in [-1, 1].")
+        if self.tuning.objective not in {"sharpe", "sortino", "calmar", "total_return"}:
+            raise ValueError("Unsupported tuning objective.")
+        if not set(self.reporting.formats).issubset({"png", "csv", "md"}):
+            raise ValueError("Reporting formats must be selected from png, csv, and md.")
 
 
 SECTIONS: dict[str, type] = {
@@ -116,14 +140,13 @@ SECTIONS: dict[str, type] = {
     "execution": ExecutionConfig,
     "models": ModelsConfig,
     "tuning": TuningConfig,
-    "reporting": ReportingConfig
+    "reporting": ReportingConfig,
 }
 
 
 def coerce(section_cls: type, values: dict[str, Any]):
     normalized = {
-        key: tuple(value) if isinstance(value, list) else value
-        for key, value in values.items()
+        key: tuple(value) if isinstance(value, list) else value for key, value in values.items()
     }
     return section_cls(**normalized)
 

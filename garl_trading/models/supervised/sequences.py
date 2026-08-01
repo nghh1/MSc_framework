@@ -5,36 +5,62 @@ import pandas as pd
 import torch
 from sklearn.preprocessing import StandardScaler
 from torch import nn
+
+from garl_trading.utils import resolve_torch_device
+
 from ..base import ForecastModel, ModelContext
 
 
 class LSTM_custom(nn.Module):
     def __init__(self, n_features: int, hidden: int, layers: int, dropout: float):
         super().__init__()
-        self.encoder = nn.LSTM(n_features, hidden, num_layers=layers, batch_first=True, dropout=dropout if layers > 1 else 0)
-        self.head = nn.Sequential(nn.Linear(hidden, hidden // 2), nn.ReLU(), nn.Linear(hidden // 2, 1))
+        self.encoder = nn.LSTM(
+            n_features,
+            hidden,
+            num_layers=layers,
+            batch_first=True,
+            dropout=dropout if layers > 1 else 0,
+        )
+        self.head = nn.Sequential(
+            nn.Linear(hidden, hidden // 2), nn.ReLU(), nn.Linear(hidden // 2, 1)
+        )
 
     def forward(self, x):
         _, (hidden, _) = self.encoder(x)
         return self.head(hidden[-1]).squeeze(-1)
 
 
+class CausalConvBlock(nn.Module):
+    def __init__(self, in_channels: int, out_channels: int, dilation: int, dropout: float):
+        super().__init__()
+        self.left_padding = 2 * dilation
+        self.conv = nn.Conv1d(in_channels, out_channels, kernel_size=3, dilation=dilation)
+        self.activation = nn.ReLU()
+        self.dropout = nn.Dropout(dropout)
+        self.residual = (
+            nn.Identity()
+            if in_channels == out_channels
+            else nn.Conv1d(in_channels, out_channels, 1)
+        )
+
+    def forward(self, x):
+        causal = nn.functional.pad(x, (self.left_padding, 0))
+        return self.dropout(self.activation(self.conv(causal) + self.residual(x)))
+
+
 class TCN_custom(nn.Module):
     def __init__(self, n_features: int, hidden: int, dropout: float):
         super().__init__()
         self.network = nn.Sequential(
-            nn.Conv1d(n_features, hidden, 3, padding=2, dilation=1),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Conv1d(hidden, hidden, 3, padding=4, dilation=2),
-            nn.ReLU(),
-            nn.Dropout(dropout),
+            CausalConvBlock(n_features, hidden, dilation=1, dropout=dropout),
+            CausalConvBlock(hidden, hidden, dilation=2, dropout=dropout),
+            CausalConvBlock(hidden, hidden, dilation=4, dropout=dropout),
+            CausalConvBlock(hidden, hidden, dilation=8, dropout=dropout),
         )
         self.head = nn.Linear(hidden, 1)
 
     def forward(self, x):
         y = self.network(x.transpose(1, 2))
-        y = y[..., : x.shape[1]]
         return self.head(y[:, :, -1]).squeeze(-1)
 
 
@@ -45,6 +71,8 @@ class TFT_custom(nn.Module):
         self.project = nn.Linear(n_features, hidden)
         self.encoder = nn.LSTM(hidden, hidden, batch_first=True)
         self.attention = nn.MultiheadAttention(hidden, heads, dropout=dropout, batch_first=True)
+        self.attention_gate = nn.Sequential(nn.Linear(hidden, hidden * 2), nn.GLU(dim=-1))
+        self.dropout = nn.Dropout(dropout)
         self.norm = nn.LayerNorm(hidden)
         self.head = nn.Linear(hidden, 1)
 
@@ -54,15 +82,25 @@ class TFT_custom(nn.Module):
         size = encoded.shape[1]
         mask = torch.triu(torch.ones(size, size, device=x.device, dtype=torch.bool), diagonal=1)
         attended, _ = self.attention(encoded, encoded, encoded, attn_mask=mask)
-        return self.head(self.norm(encoded + attended)[:, -1]).squeeze(-1)
+        fused = self.norm(encoded + self.dropout(self.attention_gate(attended)))
+        return self.head(fused[:, -1]).squeeze(-1)
 
 
 class TorchSequenceForecaster(ForecastModel):
-    architecture = "lstm" # default
+    architecture = "lstm"  # default
 
-    def __init__(self, lookback: int = 20, hidden: int = 32, layers: int = 1, heads: int = 4, 
-                 dropout: float = 0.1, epochs: int = 20, learning_rate: float = 1e-3, seed: int = 42, 
-                 device: str | None = None) -> None:
+    def __init__(
+        self,
+        lookback: int = 20,
+        hidden: int = 32,
+        layers: int = 1,
+        heads: int = 4,
+        dropout: float = 0.1,
+        epochs: int = 20,
+        learning_rate: float = 1e-3,
+        seed: int = 42,
+        device: str | None = None,
+    ) -> None:
         super().__init__()
         self.lookback = lookback
         self.hidden = hidden
@@ -72,7 +110,7 @@ class TorchSequenceForecaster(ForecastModel):
         self.epochs = epochs
         self.learning_rate = learning_rate
         self.seed = seed
-        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = resolve_torch_device(device or "auto")
         self.scaler = StandardScaler()
         self.model: nn.Module | None = None
         self.columns: list[str] = []
@@ -83,13 +121,17 @@ class TorchSequenceForecaster(ForecastModel):
             return LSTM_custom(n_features, self.hidden, self.layers, self.dropout)
         if self.architecture == "tcn":
             return TCN_custom(n_features, self.hidden, self.dropout)
+        if self.hidden % self.heads:
+            raise ValueError("TFT hidden size must be divisible by the number of attention heads.")
         return TFT_custom(n_features, self.hidden, self.heads, self.dropout)
 
     def windows(self, values: np.ndarray, targets: np.ndarray | None = None):
-        x = np.stack([values[i - self.lookback + 1:i + 1] for i in range(self.lookback - 1, len(values))])
+        x = np.stack(
+            [values[i - self.lookback + 1 : i + 1] for i in range(self.lookback - 1, len(values))]
+        )
         if targets is None:
             return x
-        return x, targets[self.lookback - 1:]
+        return x, targets[self.lookback - 1 :]
 
     def fit(self, features: pd.DataFrame, targets: pd.Series) -> TorchSequenceForecaster:
         torch.manual_seed(self.seed)
@@ -108,7 +150,7 @@ class TorchSequenceForecaster(ForecastModel):
         for _ in range(self.epochs):
             order = torch.randperm(len(x_tensor), device=self.device)
             for start in range(0, len(order), 64):
-                batch = order[start:start + 64]
+                batch = order[start : start + 64]
                 loss = nn.functional.mse_loss(self.model(x_tensor[batch]), y_tensor[batch])
                 optimizer.zero_grad()
                 loss.backward()
@@ -120,8 +162,12 @@ class TorchSequenceForecaster(ForecastModel):
         return self
 
     @torch.no_grad()
-    def predict_returns(self, features: pd.DataFrame, context: ModelContext | None = None, 
-                        realised_targets: pd.Series | None = None) -> pd.Series:
+    def predict_returns(
+        self,
+        features: pd.DataFrame,
+        context: ModelContext | None = None,
+        realised_targets: pd.Series | None = None,
+    ) -> pd.Series:
         if self.model is None:
             raise RuntimeError("Model is not fitted.")
         history = context.features if context is not None else self.history
@@ -136,9 +182,7 @@ class TorchSequenceForecaster(ForecastModel):
                 predictions[date] = 0.0
                 continue
             window = torch.tensor(
-                scaled[i - self.lookback + 1:i + 1],
-                dtype=torch.float32,
-                device=self.device
+                scaled[i - self.lookback + 1 : i + 1], dtype=torch.float32, device=self.device
             ).unsqueeze(0)
             predictions[date] = float(self.model(window).item())
         return pd.Series(predictions).reindex(features.index)
@@ -150,9 +194,11 @@ class LSTMForecaster(TorchSequenceForecaster):
 
 class TCNForecaster(TorchSequenceForecaster):
     """Temporal Convolutional Network return forecaster."""
+
     architecture = "tcn"
 
 
 class TFTForecaster(TorchSequenceForecaster):
     """Compact Simplified Temporal Fusion Transformer return forecaster."""
+
     architecture = "tft"

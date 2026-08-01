@@ -38,7 +38,7 @@ train_epochs = 100
 rollout_length = 32
 learning_rate = 0.0003
 gamma = 0.95
-device = "mps"
+device = "auto"
 
 [tuning]
 enabled = true

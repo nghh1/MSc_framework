@@ -1,7 +1,14 @@
 from __future__ import annotations
+
 from .base import ForecastModel
-from .supervised import StaticARIMAX, RollingARIMAX, RandomForestForecaster, LSTMForecaster, \
-                        TCNForecaster,TFTForecaster
+from .supervised import (
+    LSTMForecaster,
+    RandomForestForecaster,
+    RollingARIMAX,
+    StaticARIMAX,
+    TCNForecaster,
+    TFTForecaster,
+)
 
 
 def create_forecaster(name: str, *, seed: int = 42, **params) -> ForecastModel:
@@ -18,4 +25,3 @@ def create_forecaster(name: str, *, seed: int = 42, **params) -> ForecastModel:
     if name in {"random_forest", "lstm", "tcn", "tft"}:
         params.setdefault("seed", seed)
     return constructors[name](**params)
-

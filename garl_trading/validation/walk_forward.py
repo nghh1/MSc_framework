@@ -58,9 +58,7 @@ def outer_folds(
 ) -> tuple[list[Fold], Fold | None]:
     n = len(index)
     holdout_position = (
-        int(index.searchsorted(pd.Timestamp(holdout_start)))
-        if use_holdout and holdout_start
-        else n
+        int(index.searchsorted(pd.Timestamp(holdout_start))) if use_holdout and holdout_start else n
     )
     development_n = holdout_position
     if development_n <= min_train_bars + n_folds:
@@ -106,8 +104,8 @@ def nested_folds(
     boundaries = np.linspace(min_train_bars, len(train_positions), n_folds + 1, dtype=int)
     output = []
     for i in range(n_folds):
-        train = train_positions[:boundaries[i]]
-        test = train_positions[boundaries[i]:boundaries[i + 1]]
+        train = train_positions[: boundaries[i]]
+        test = train_positions[boundaries[i] : boundaries[i + 1]]
         output.append(
             _make_fold(
                 number=i,
@@ -120,4 +118,3 @@ def nested_folds(
             )
         )
     return output
-

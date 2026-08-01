@@ -15,7 +15,7 @@ def test_future_price_change_does_not_modify_past_features():
     modified = build_features(changed)
     pd.testing.assert_frame_equal(
         original.iloc[:boundary].loc[:, FEATURE_COLUMNS],
-        modified.iloc[:boundary].loc[:, FEATURE_COLUMNS]
+        modified.iloc[:boundary].loc[:, FEATURE_COLUMNS],
     )
 
 
@@ -27,3 +27,12 @@ def test_dataset_removes_feature_warmup_before_splitting():
         np.isfinite(dataset.features[ticker].loc[:, FEATURE_COLUMNS].to_numpy()).all()
         for ticker in dataset.tickers
     )
+
+
+def test_adx_and_roc_are_finite_causal_features():
+    raw = market_fixture(("AAA",), periods=300, seed=11)["AAA"]
+    features = build_features(raw)
+    assert {"adx_14", "roc_20"}.issubset(FEATURE_COLUMNS)
+    assert features["adx_14"].dropna().between(0, 1).all()
+    expected_roc = raw["close"].pct_change(20, fill_method=None)
+    pd.testing.assert_series_equal(features["roc_20"], expected_roc, check_names=False)

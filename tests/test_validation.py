@@ -13,7 +13,7 @@ def test_walk_forward_is_purged_capped_and_has_untouched_holdout():
         max_train_bars=700,
         embargo=2,
         holdout_start=str(index[2500].date()),
-        use_holdout=True
+        use_holdout=True,
     )
     assert len(folds) == 4
     assert holdout is not None
@@ -22,4 +22,3 @@ def test_walk_forward_is_purged_capped_and_has_untouched_holdout():
         assert len(fold.train) <= 700
         assert fold.train[-1] <= fold.test[0] - 3
         assert not np.intersect1d(fold.train, fold.test).size
-

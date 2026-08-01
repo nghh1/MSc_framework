@@ -1,7 +1,11 @@
 from __future__ import annotations
+
 from dataclasses import dataclass
+
 import pandas as pd
+
 from .metrics import summarise
+
 
 @dataclass(frozen=True)
 class PortfolioResult:
@@ -14,10 +18,15 @@ class PortfolioResult:
     metrics: dict[str, float]
 
 
-def run_portfolio(closes: pd.DataFrame, target_positions: pd.DataFrame, 
-                  initial_capital: float, transaction_cost_bps: float, 
-                  slippage_bps: float, short_borrow_bps_annual: float = 0.0) -> PortfolioResult:
-    
+def run_portfolio(
+    closes: pd.DataFrame,
+    target_positions: pd.DataFrame,
+    initial_capital: float,
+    transaction_cost_bps: float,
+    slippage_bps: float,
+    short_borrow_bps_annual: float = 0.0,
+) -> PortfolioResult:
+
     closes = closes.astype(float).sort_index()
     positions = target_positions.reindex(index=closes.index, columns=closes.columns).fillna(0.0)
     positions = positions.clip(-1.0, 1.0)
@@ -33,6 +42,5 @@ def run_portfolio(closes: pd.DataFrame, target_positions: pd.DataFrame,
     costs = trade_cost + borrow_cost
     net = gross - costs
     equity = initial_capital * (1 + net).cumprod()
-    metrics = summarise(equity, net, held, turnover)
+    metrics = summarise(equity, net, held, turnover, gross_returns=gross, costs=costs)
     return PortfolioResult(equity, net, gross, held, turnover, costs, metrics)
-
