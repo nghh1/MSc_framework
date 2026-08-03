@@ -13,7 +13,7 @@ from .core import (
     RewardEarlyStopper,
     TradingState,
     fit_feature_scalers,
-    make_states
+    make_states,
 )
 from .trainers import RLPolicySet
 

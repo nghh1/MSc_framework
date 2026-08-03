@@ -31,13 +31,16 @@ additional charts should answer a distinct research question rather than repeat 
 - `performance_comparison.csv` and `.md` contain cumulative return, annual return, annual
   volatility, Sharpe, Sortino, maximum drawdown, and cost drag.
 - `sharpe_over_time.csv` and `.md` contain mean Sharpe by out-of-sample period and baseline.
-- `summary.csv` retains means, confidence intervals, observation counts, and analysis scope.
+- `summary.csv` retains means, intervals, observation counts, analysis scope, and whether each
+  interval is based on training seeds, walk-forward folds, or is not estimable.
 - `cost_sensitivity.csv` contains every replayed cost scenario.
 - `training_summary.csv` records completed epochs, early stopping, and training-reward endpoints.
 
-Headline aggregation uses the untouched final holdout when present, with conventional t intervals
-across repeated stochastic runs. Without a holdout, repeated seeds are first averaged within each
-fold and uncertainty is computed across folds, avoiding pseudo-replication of related seed runs.
+Headline aggregation uses the untouched final holdout when present. For stochastic RL methods, its
+t intervals describe variation across repeated training seeds only; they do not measure uncertainty
+across market regimes. An interval is not estimated for deterministic methods with one result.
+Without a holdout, repeated seeds are first averaged within each fold and uncertainty is computed
+across folds, avoiding pseudo-replication of related seed runs.
 
 ## Metric set
 

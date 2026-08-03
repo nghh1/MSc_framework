@@ -18,7 +18,7 @@ from .core import (
     fit_feature_scalers,
     greedy_asset_positions,
     initialise_asset_actor_critics,
-    make_states
+    make_states,
 )
 
 

@@ -23,6 +23,7 @@ class ArtifactStore:
         self.equity: list[pd.DataFrame] = []
         self.daily_returns: list[pd.DataFrame] = []
         self.training_diagnostics: list[pd.DataFrame] = []
+        self.tuning_parameters: list[dict] = []
         self.failures: list[dict] = []
 
     def initialise(self, config: FrameworkConfig, config_path: str | Path) -> None:
@@ -93,6 +94,23 @@ class ArtifactStore:
             frame[key] = value
         self.training_diagnostics.append(frame)
 
+    def add_tuning_parameters(
+        self, metadata: dict, ticker: str, parameters: dict
+    ) -> None:
+        """Retain the selected settings needed to reproduce each fitted model."""
+        for parameter, value in sorted(parameters.items()):
+            self.tuning_parameters.append(
+                {
+                    "baseline": metadata["baseline"],
+                    "fold": metadata["fold"],
+                    "fold_kind": metadata["fold_kind"],
+                    "ticker": ticker,
+                    "tuning_seed": metadata["seed"],
+                    "parameter": parameter,
+                    "value": json.dumps(value, default=str),
+                }
+            )
+
     def flush(self) -> None:
         pd.DataFrame(self.metrics).to_csv(self.path / "metrics.csv", index=False)
         if self.positions:
@@ -108,6 +126,10 @@ class ArtifactStore:
         if self.training_diagnostics:
             pd.concat(self.training_diagnostics, ignore_index=True).to_csv(
                 self.path / "training_diagnostics.csv", index=False
+            )
+        if self.tuning_parameters:
+            pd.DataFrame(self.tuning_parameters).to_csv(
+                self.path / "tuning_parameters.csv", index=False
             )
         failure_columns = ["baseline", "fold", "repetition", "seed", "error"]
         pd.DataFrame(self.failures, columns=failure_columns).to_csv(

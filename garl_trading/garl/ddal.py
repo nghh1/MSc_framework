@@ -19,7 +19,7 @@ from garl_trading.rl.core import (
     apply_gradient,
     fit_feature_scalers,
     initialise_asset_actor_critics,
-    make_states
+    make_states,
 )
 from garl_trading.rl.trainers import RLPolicySet
 from garl_trading.utils import resolve_torch_device

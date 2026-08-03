@@ -14,7 +14,7 @@ from garl_trading.rl import (
     train_independent_ppo,
     train_joint_a2c,
     train_joint_dqn,
-    train_joint_ppo
+    train_joint_ppo,
 )
 
 

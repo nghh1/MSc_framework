@@ -157,7 +157,7 @@ baselines, while `independent_a2c` is the direct “GARL without sharing” abla
 | `tuning/search.py` | Optuna inner-fold tuning for every supervised forecaster, including causal rolling-ARIMAX updates and consistent financing assumptions. |
 | `tuning/rl_search.py` | Exhaustive nine-point rollout-length/learning-rate grid on the latest embargoed validation segment; selected settings are reused across evaluation seeds. |
 | `experiment/runner.py` | Downloads price data, builds folds, tunes/trains/evaluates every baseline, repeats stochastic methods across seeds, runs two distinct passive benchmarks, checkpoints artifacts, and triggers reporting. |
-| `experiment/artifacts.py` | Creates a run directory and writes configuration, data snapshots, metrics, positions, daily paths, RL training diagnostics, equity paths, and failures. |
+| `experiment/artifacts.py` | Creates a run directory and writes configuration, data snapshots, selected tuning parameters, metrics, positions, daily paths, RL training diagnostics, equity paths, and failures. |
 
 ### Reporting
 
@@ -205,6 +205,7 @@ results/<experiment-name>-<UTC-run-id>/
 ├── equity.csv
 ├── daily_returns.csv
 ├── training_diagnostics.csv
+├── tuning_parameters.csv
 ├── failures.csv
 └── report/
     ├── summary.csv
@@ -239,12 +240,13 @@ results/<experiment-name>-<UTC-run-id>/
 | `equity.csv` | Long-form net portfolio equity curve for every evaluation run. |
 | `daily_returns.csv` | Net and gross returns, explicit cost, turnover, and cash exposure by date for every evaluation run. |
 | `training_diagnostics.csv` | Per-epoch RL reward/loss diagnostics, stopping decisions, and GARL queue/sharing events. |
+| `tuning_parameters.csv` | Selected supervised parameters by stock and selected portfolio-level RL parameters by evaluation fold. |
 | `failures.csv` | Any failed baseline/fold/seed and its exception; header-only when no failures occur. |
-| `report/summary.csv` | Machine-readable baseline means and confidence intervals. |
+| `report/summary.csv` | Machine-readable baseline means, intervals, observation counts, and the interval basis. |
 | `report/summary.md` | Dissertation-ready comparison table, scope, and explanation of the figures. |
 | `report/performance_comparison.*` | Main baseline table: cumulative/annual return, volatility, Sharpe, Sortino, drawdown, and cost drag. |
 | `report/sharpe_over_time.*` | Baseline Sharpe ratios across successive walk-forward periods. |
-| `report/sharpe_ranking.png` | Headline Sharpe means and confidence intervals. |
+| `report/sharpe_ranking.png` | Headline Sharpe means with seed- or fold-based intervals where estimable. |
 | `report/return_vs_drawdown.png` | CAGR versus absolute maximum drawdown. |
 | `report/cumulative_returns_net.png` | Net-of-cost cumulative return curves with concise date labels. |
 | `report/active_cumulative_returns_net.png` | Net curves for learned/active methods only, avoiding passive-benchmark scale compression. |

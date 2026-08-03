@@ -87,15 +87,22 @@ def summary(metrics: pd.DataFrame, confidence: float) -> pd.DataFrame:
             "baseline": baseline,
             "observations": len(group),
             "scope": scope,
+            "interval_basis": (
+                "training_seed"
+                if scope == "final_holdout" and len(group) > 1
+                else "walk_forward_fold"
+                if scope == "walk_forward_fold_mean" and len(group) > 1
+                else "not_estimable"
+            ),
         }
         for column in numeric:
             values = group[column].dropna()
             mean = float(values.mean()) if len(values) else np.nan
-            sem = float(values.sem()) if len(values) > 1 else 0.0
+            sem = float(values.sem()) if len(values) > 1 else np.nan
             critical = (
                 float(stats.t.ppf((1 + confidence) / 2, len(values) - 1))
                 if len(values) > 1
-                else 0.0
+                else np.nan
             )
             row[f"{column}_mean"] = mean
             row[f"{column}_ci"] = sem * critical
@@ -108,7 +115,7 @@ def plot_sharpe_ranking(report: pd.DataFrame, path: Path) -> None:
     names = report["baseline"].tolist()
     fig, axis = plt.subplots(figsize=(10, max(5, 0.42 * len(names))), constrained_layout=True)
     y = np.arange(len(names))
-    xerr = report["sharpe_ci"].to_numpy()
+    xerr = report["sharpe_ci"].fillna(0.0).to_numpy()
     if {"sharpe_ci_lower", "sharpe_ci_upper"}.issubset(report.columns):
         means = report["sharpe_mean"].to_numpy()
         xerr = np.vstack(
@@ -128,7 +135,14 @@ def plot_sharpe_ranking(report: pd.DataFrame, path: Path) -> None:
     axis.invert_yaxis()
     axis.axvline(0, color="#333333", linewidth=0.8)
     axis.set_xlabel("Annualised Sharpe ratio")
-    axis.set_title("Out-of-sample Sharpe ratio with confidence interval")
+    bases = set(report.get("interval_basis", pd.Series(dtype=str)).dropna())
+    if "training_seed" in bases:
+        title = "Out-of-sample Sharpe ratio (interval across training seeds)"
+    elif "walk_forward_fold" in bases:
+        title = "Out-of-sample Sharpe ratio (interval across test folds)"
+    else:
+        title = "Out-of-sample Sharpe ratio"
+    axis.set_title(title)
     _style_axis(axis)
     _save(fig, path)
 
@@ -505,7 +519,9 @@ def build_report(
         f"Headline scope: {scope}. Confidence level: {confidence:.0%}. "
         "All equity and cumulative-return figures are net of configured transaction costs, "
         "slippage, and short-borrow costs. Sharpe and Sortino ratios assume a zero risk-free "
-        "rate.\n\n"
+        "rate. Final-holdout intervals describe variation across stochastic training seeds only; "
+        "they are left blank for deterministic methods and do not measure uncertainty across "
+        "market regimes.\n\n"
         "## Performance comparison\n\n"
         f"{markdown_table(comparison)}\n\n"
         "## Reporting design\n\n"

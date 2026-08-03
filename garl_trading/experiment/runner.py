@@ -18,7 +18,7 @@ from garl_trading.rl import (
     train_independent_ppo,
     train_joint_a2c,
     train_joint_dqn,
-    train_joint_ppo
+    train_joint_ppo,
 )
 from garl_trading.tuning import tune_forecaster, tune_rl_policy
 from garl_trading.validation import nested_folds, outer_folds
@@ -191,6 +191,11 @@ class ExperimentRunner:
                         short_borrow_bps_annual=cfg.execution.short_borrow_bps_annual,
                         objective_metric=cfg.tuning.objective,
                     )
+                    store.add_tuning_parameters(
+                        self.metadata(name, fold, 0, cfg.experiment.seed),
+                        ticker,
+                        parameters,
+                    )
                 if name in {"lstm", "tcn", "tft"}:
                     parameters.setdefault("lookback", cfg.models.lookback)
                     parameters.setdefault("device", cfg.models.device)
@@ -269,6 +274,11 @@ class ExperimentRunner:
                         objective_metric=cfg.tuning.objective,
                     )
                     self.rl_parameters[tuning_key] = selected
+                    store.add_tuning_parameters(
+                        self.metadata(name, fold, repetition, cfg.experiment.seed),
+                        "ALL",
+                        selected,
+                    )
                 common.update(self.rl_parameters[tuning_key])
             if name == "single_a2c":
                 policy = train_joint_a2c(train_features, train_closes, **common)

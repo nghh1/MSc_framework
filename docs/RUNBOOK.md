@@ -64,9 +64,9 @@ sufficient for CPU and supported Apple Silicon environments.
    garl-trading report --run-dir results/<printed-run-id>
    ```
 
-7. Archive the run's `manifest.json`, copied `config.toml`, price snapshot, metrics,
-   positions, daily returns, training diagnostics, and report together. Never merge tables from
-   different run IDs.
+7. Archive the run's `manifest.json`, copied `config.toml`, price snapshot, selected tuning
+   parameters, metrics, positions, daily returns, training diagnostics, and report together. Never
+   merge tables from different run IDs.
 
 The default experiment is computationally expensive because tuning is nested inside outer folds and
 is performed per stock for supervised models. Start with fewer Optuna trials and one repetition in a

@@ -85,6 +85,7 @@ results/<run-id>/
   equity.csv
   daily_returns.csv
   training_diagnostics.csv
+  tuning_parameters.csv
   failures.csv
   report/
     data_split_timeline.png

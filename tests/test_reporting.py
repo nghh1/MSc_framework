@@ -29,6 +29,21 @@ def test_summary_reports_seed_and_fold_uncertainty():
     assert (result["sharpe_ci"] > 0).all()
 
 
+def test_final_holdout_interval_is_seed_scoped_and_not_fabricated_for_single_run():
+    metrics = pd.DataFrame(
+        {
+            "baseline": ["buy_and_hold", "garl_ddal", "garl_ddal"],
+            "fold_kind": ["final_holdout"] * 3,
+            "sharpe": [0.8, 0.5, 0.9],
+        }
+    )
+    result = build_summary(metrics, 0.95).set_index("baseline")
+    assert np.isnan(result.loc["buy_and_hold", "sharpe_ci"])
+    assert result.loc["buy_and_hold", "interval_basis"] == "not_estimable"
+    assert result.loc["garl_ddal", "sharpe_ci"] > 0
+    assert result.loc["garl_ddal", "interval_basis"] == "training_seed"
+
+
 def test_report_emits_each_dissertation_figure_as_a_separate_file(tmp_path):
     run_dir = tmp_path / "run"
     (run_dir / "data").mkdir(parents=True)
