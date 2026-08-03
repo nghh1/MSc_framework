@@ -1,3 +1,4 @@
+import torch
 from conftest import market_fixture
 
 from garl_trading.data import build_dataset
@@ -8,6 +9,7 @@ from garl_trading.rl import (
     train_joint_dqn,
     train_joint_ppo,
 )
+from garl_trading.rl.core import RewardEarlyStopper
 
 
 def test_ppo_and_dqn_joint_and_independent_policies_emit_position_matrices():
@@ -43,3 +45,22 @@ def test_ppo_and_dqn_joint_and_independent_policies_emit_position_matrices():
         positions = policy.positions(test_features, context=context)
         assert positions.shape == (5, 2)
         assert positions.abs().max().max() <= 1
+
+def test_early_stopping_patience_starts_after_minimum_epochs():
+    model = torch.nn.Linear(1, 1)
+    stopper = RewardEarlyStopper(
+        patience=2,
+        min_delta=0.0,
+        minimum_epochs=3,
+    )
+
+    assert not stopper.update(0, 1.0, model)
+    assert not stopper.update(1, 0.0, model)
+    assert not stopper.update(2, 0.0, model)
+
+    # Patience starts only after three completed burn-in epochs.
+    assert not stopper.update(3, 0.0, model)
+    assert stopper.update(4, 0.0, model)
+
+    assert stopper.best_epoch == 0
+    assert stopper.stop_epoch == 4

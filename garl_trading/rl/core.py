@@ -18,24 +18,39 @@ class RewardEarlyStopper:
         self.best = -np.inf
         self.bad_epochs = 0
         self.best_state = None
+        self.best_epoch: int | None = None
+        self.stop_epoch: int | None = None
 
     def update(self, epoch: int, reward: float, models) -> bool:
-        if reward > self.best + self.min_delta:
+        improved = reward > self.best + self.min_delta
+        if improved:
             self.best = reward
-            self.bad_epochs = 0
+            self.best_epoch = epoch
+
             if isinstance(models, dict):
                 self.best_state = {
-                    name: deepcopy(model.state_dict()) for name, model in models.items()
+                    name: deepcopy(model.state_dict())
+                    for name, model in models.items()
                 }
             else:
                 self.best_state = deepcopy(models.state_dict())
+        completed_epochs = epoch + 1
+        if completed_epochs <= self.minimum_epochs:
+            self.bad_epochs = 0
+            return False
+        if improved:
+            self.bad_epochs = 0
         else:
             self.bad_epochs += 1
-        return epoch + 1 >= self.minimum_epochs and self.bad_epochs >= self.patience
+        should_stop = self.bad_epochs >= self.patience
+        if should_stop:
+            self.stop_epoch = epoch
+        return should_stop
 
     def restore(self, models) -> None:
         if self.best_state is None:
             return
+
         if isinstance(models, dict):
             for name, model in models.items():
                 model.load_state_dict(self.best_state[name])

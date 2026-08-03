@@ -167,7 +167,13 @@ def train_independent_ppo(
         diagnostics.append(row)
         smoothed = float(np.mean([item["training_reward"] for item in diagnostics[-5:]]))
         if stopper.update(epoch, smoothed, models):
-            diagnostics[-1]["early_stopped"] = True
+            diagnostics[-1].update(
+                {
+                    "early_stopped": True,
+                    "best_epoch": stopper.best_epoch,
+                    "stop_epoch": stopper.stop_epoch,
+                }
+            )
             break
     stopper.restore(models)
     return RLPolicySet(
@@ -296,7 +302,13 @@ def train_joint_ppo(
         )
         smoothed = float(np.mean([row["training_reward"] for row in diagnostics[-5:]]))
         if stopper.update(epoch, smoothed, model):
-            diagnostics[-1]["early_stopped"] = True
+            diagnostics[-1].update(
+                {
+                    "early_stopped": True,
+                    "best_epoch": stopper.best_epoch,
+                    "stop_epoch": stopper.stop_epoch,
+                }
+            )
             break
     stopper.restore(model)
     return RLPolicySet(

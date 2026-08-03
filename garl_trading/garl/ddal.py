@@ -168,7 +168,13 @@ def train_garl_ddal(
         reward_history[ticker].append(reward)
         smoothed = float(np.mean(reward_history[ticker][-5:]))
         if stoppers[ticker].update(epoch, smoothed, models[ticker]):
-            diagnostics[-1]["early_stopped"] = True
+            diagnostics[-1].update(
+                {
+                    "early_stopped": True,
+                    "best_epoch": stoppers[ticker].best_epoch,
+                    "stop_epoch": stoppers[ticker].stop_epoch,
+                }
+            )
             stoppers[ticker].restore(models[ticker])
             local_epochs[ticker] = epochs
             continue
