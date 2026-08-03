@@ -47,7 +47,9 @@ sufficient for CPU and supported Apple Silicon environments.
 
 1. Activate the environment and run the tests.
 2. Copy `configs/default.toml` to a named dissertation configuration and freeze tickers, dates,
-   costs, seeds, folds, tuning budgets, and device before looking at final-holdout results.
+   the zero risk-free-rate assumption, the 50-bps annual short-borrow assumption, costs, 10 seeds, folds,
+   the nine-point RL tuning grid, early-stopping settings, and device before looking at
+   final-holdout results.
 3. Run the full experiment:
 
    ```bash
@@ -59,11 +61,12 @@ sufficient for CPU and supported Apple Silicon environments.
 6. Rebuild reporting without retraining when needed:
 
    ```bash
-   garl-trading report --run-dir artifacts/<printed-run-id>
+   garl-trading report --run-dir results/<printed-run-id>
    ```
 
-7. Archive the run's `manifest.json`, copied `config.toml`, price snapshot hash, data file, metrics,
-   positions, daily returns, and report together. Never merge tables from different run IDs.
+7. Archive the run's `manifest.json`, copied `config.toml`, price snapshot, metrics,
+   positions, daily returns, training diagnostics, and report together. Never merge tables from
+   different run IDs.
 
 The default experiment is computationally expensive because tuning is nested inside outer folds and
 is performed per stock for supervised models. Start with fewer Optuna trials and one repetition in a
@@ -72,7 +75,11 @@ results as the final comparison. Keep the final holdout untouched until all desi
 
 ## Expected command-side behaviour
 
-Data download happens once at the start of a run. Each evaluation period then executes buy-and-hold,
-all supervised models, and every repeated RL baseline. Artifacts are flushed after each period, so a
-partial run remains diagnosable. Reporting reads saved artifacts only; it never retrains a model or
-downloads revised prices.
+Price data download once at the start of a run. Each evaluation period then executes
+true buy-and-hold, daily equal-weight rebalancing, all supervised models, and every repeated RL
+baseline. Artifacts are flushed after each period, so a partial run remains diagnosable. Reporting
+reads saved artifacts only; it never retrains a model or downloads revised prices.
+
+Nine RL trials exhaust the configured 3-by-3 rollout/learning-rate grid. Ten RL seeds balance
+stochastic uncertainty estimation against computation. Run a one-seed smoke
+configuration first, but retain all 10 predeclared seeds for the dissertation run.

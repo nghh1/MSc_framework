@@ -6,7 +6,7 @@ PPO and DQN algorithm live only in the non-GARL RL baseline modules.
 
 from __future__ import annotations
 
-from copy import deepcopy
+import heapq
 from dataclasses import dataclass
 
 import numpy as np
@@ -14,11 +14,12 @@ import pandas as pd
 import torch
 
 from garl_trading.rl.core import (
-    ActorCritic,
+    RewardEarlyStopper,
     a2c_gradient,
     apply_gradient,
     fit_feature_scalers,
-    make_states,
+    initialise_asset_actor_critics,
+    make_states
 )
 from garl_trading.rl.trainers import RLPolicySet
 from garl_trading.utils import resolve_torch_device
@@ -68,76 +69,130 @@ def train_garl_ddal(
     share_after_fraction: float = 0.3,
     share_every: int = 4,
     pool_size: int | None = None,
+    short_borrow_bps_annual: float = 0.0,
+    early_stopping_patience: int = 15,
+    early_stopping_min_delta: float = 1e-4,
+    minimum_train_epochs: int = 30
 ) -> RLPolicySet:
     """
-    Deterministic single-process DDAL-style simulation with aligned model initialisation.
+    Deterministic event-driven simulation of decentralised asynchronous DDAL queues.
 
-    Every agent starts from the same parameter state. Gradient pieces are merged by generation
-    epoch, and each sharing update includes the receiver's own latest gradient. Absolute return
-    correlation supplies the task-relevance term for stock-specific environments.
+    Agents have independent initial parameters and local clocks. After private learning, every
+    generated gradient is copied into every agent's FIFO knowledge queue. Each agent independently
+    retrieves and removes a batch from its queue on its own update schedule, matching Algorithm 1
+    in Wu and Zeng as closely as possible without requiring distributed hardware.
     """
     device = resolve_torch_device(device)
     tickers = tuple(features)
     scalers = fit_feature_scalers(features)
     states = make_states(
-        features, closes, scalers, levels=levels, lookback=lookback, cost_rate=cost_rate
+        features, closes, scalers, levels=levels, lookback=lookback, cost_rate=cost_rate,
+        short_borrow_bps_annual=short_borrow_bps_annual
     )
     observation_size = features[tickers[0]].shape[1] * lookback + 1
-    torch.manual_seed(seed)
-    template = ActorCritic(observation_size, len(levels)).to(device)
-    models = {ticker: deepcopy(template) for ticker in tickers}
+    models = initialise_asset_actor_critics(
+        tickers, observation_size, len(levels), seed, device
+    )
     optimizers = {
         ticker: torch.optim.Adam(models[ticker].parameters(), lr=learning_rate)
         for ticker in tickers
     }
     randoms = {ticker: np.random.default_rng(seed + i) for i, ticker in enumerate(tickers)}
     threshold = int(epochs * share_after_fraction)
-    pool_size = pool_size or len(tickers)
     relevance = return_relevance(closes)
-    pending: dict[str, list[GradientPiece]] = {ticker: [] for ticker in tickers}
+    queues: dict[str, list[GradientPiece]] = {ticker: [] for ticker in tickers}
+    local_epochs = {ticker: 0 for ticker in tickers}
+    scheduler = np.random.default_rng(seed + 100000)
+    pace = {ticker: float(scheduler.uniform(0.75, 1.25)) for ticker in tickers}
+    events = [
+        (float(scheduler.exponential(pace[ticker])), number, ticker)
+        for number, ticker in enumerate(tickers)
+    ]
+    heapq.heapify(events)
+    event_number = len(events)
+    diagnostics: list[dict] = []
+    stoppers = {
+        ticker: RewardEarlyStopper(
+            early_stopping_patience, early_stopping_min_delta, minimum_train_epochs
+        )
+        for ticker in tickers
+    }
+    reward_history: dict[str, list[float]] = {ticker: [] for ticker in tickers}
 
-    for epoch in range(epochs):
-        pieces = {}
-        for ticker in tickers:
-            gradient, _ = a2c_gradient(
-                models[ticker],
-                states[ticker],
-                rollout_length=rollout_length,
-                gamma=gamma,
-                rng=randoms[ticker],
-            )
-            pieces[ticker] = GradientPiece(gradient, ticker, epoch, 1.0)
-
+    while events:
+        simulation_time, _, ticker = heapq.heappop(events)
+        epoch = local_epochs[ticker]
+        if epoch >= epochs:
+            continue
+        gradient, loss, reward = a2c_gradient(
+            models[ticker],
+            states[ticker],
+            rollout_length=rollout_length,
+            gamma=gamma,
+            rng=randoms[ticker]
+        )
+        shared_update = False
         if epoch < threshold:
-            for ticker in tickers:
-                apply_gradient(models[ticker], optimizers[ticker], pieces[ticker].gradients)
-            continue
-
-        for receiver in tickers:
-            pending[receiver].extend(
-                GradientPiece(
-                    piece.gradients,
-                    piece.source,
-                    piece.epoch,
-                    relevance[(receiver, piece.source)],
+            apply_gradient(models[ticker], optimizers[ticker], gradient)
+        else:
+            for receiver in tickers:
+                queues[receiver].append(
+                    GradientPiece(
+                        gradient,
+                        ticker,
+                        epoch,
+                        relevance[(receiver, ticker)]
+                    )
                 )
-                for piece in pieces.values()
-            )
-        if (epoch + 1) % share_every:
-            for ticker in tickers:
-                apply_gradient(models[ticker], optimizers[ticker], pieces[ticker].gradients)
+            if (epoch + 1) % share_every == 0 and queues[ticker]:
+                take = (
+                    len(queues[ticker])
+                    if pool_size is None
+                    else min(pool_size, len(queues[ticker]))
+                )
+                chosen = queues[ticker][:take]
+                del queues[ticker][:take]
+                apply_gradient(models[ticker], optimizers[ticker], weighted_average(chosen))
+                shared_update = True
+        diagnostics.append(
+            {
+                "epoch": epoch,
+                "agent": ticker,
+                "simulation_time": simulation_time,
+                "training_reward": reward,
+                "loss": loss,
+                "queue_size": len(queues[ticker]),
+                "shared_update": shared_update
+            }
+        )
+        reward_history[ticker].append(reward)
+        smoothed = float(np.mean(reward_history[ticker][-5:]))
+        if stoppers[ticker].update(epoch, smoothed, models[ticker]):
+            diagnostics[-1]["early_stopped"] = True
+            stoppers[ticker].restore(models[ticker])
+            local_epochs[ticker] = epochs
             continue
-
-        for ticker in tickers:
-            candidates = sorted(
-                pending[ticker],
-                key=lambda piece: (piece.epoch, piece.source == ticker),
-                reverse=True,
+        local_epochs[ticker] += 1
+        if local_epochs[ticker] < epochs:
+            heapq.heappush(
+                events,
+                (
+                    simulation_time + float(scheduler.exponential(pace[ticker])),
+                    event_number,
+                    ticker,
+                )
             )
-            own = pieces[ticker]
-            chosen = [own]
-            chosen.extend(piece for piece in candidates if piece.source != ticker)
-            chosen = chosen[:pool_size]
-            apply_gradient(models[ticker], optimizers[ticker], weighted_average(chosen))
-            pending[ticker].clear()
-    return RLPolicySet("garl", models, scalers, tickers, levels, lookback)
+            event_number += 1
+    for ticker in tickers:
+        stoppers[ticker].restore(models[ticker])
+    return RLPolicySet(
+        "garl",
+        models,
+        scalers,
+        tickers,
+        levels,
+        lookback,
+        cost_rate,
+        short_borrow_bps_annual / 10000 / 252,
+        diagnostics
+    )

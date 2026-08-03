@@ -1,8 +1,8 @@
 [experiment]
 name = "garl_main"
 seed = 42
-repetitions = 5
-artifacts_dir = "artifacts"
+repetitions = 10
+artifacts_dir = "results"
 
 [data]
 start = "2001-01-01"
@@ -16,14 +16,14 @@ inner_folds = 3
 min_train_bars = 1260
 max_train_bars = 1864
 embargo_bars = 1
-final_holdout_start = "2021-01-01"
+final_holdout_start = "2023-01-01"
 use_final_holdout = true
 
 [execution]
 initial_capital = 100000.0
 transaction_cost_bps = 5.0
 slippage_bps = 2.0
-short_borrow_bps_annual = 0.0
+short_borrow_bps_annual = 50.0
 position_levels = [-1.0, -0.5, 0.0, 0.5, 1.0]
 
 [models]
@@ -39,11 +39,17 @@ rollout_length = 32
 learning_rate = 0.0003
 gamma = 0.95
 device = "auto"
+early_stopping_patience = 15
+early_stopping_min_delta = 0.0001
+minimum_train_epochs = 30
+garl_share_after_fraction = 0.3
+garl_share_every = 4
+garl_pool_size = 0
 
 [tuning]
 enabled = true
 trials = 15
-rl_trials = 5
+rl_trials = 9
 objective = "sharpe"
 
 [reporting]

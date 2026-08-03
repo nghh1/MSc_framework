@@ -54,6 +54,7 @@ def tune_forecaster(
     initial_capital: float,
     transaction_cost_bps: float,
     slippage_bps: float,
+    short_borrow_bps_annual: float,
     objective_metric: str = "sharpe",
 ) -> dict:
     def objective(trial: optuna.Trial) -> float:
@@ -80,6 +81,7 @@ def tune_forecaster(
                     initial_capital=initial_capital,
                     transaction_cost_bps=transaction_cost_bps,
                     slippage_bps=slippage_bps,
+                    short_borrow_bps_annual=short_borrow_bps_annual,
                 )
                 score = result.metrics[objective_metric]
                 scores.append(score if np.isfinite(score) else -10.0)

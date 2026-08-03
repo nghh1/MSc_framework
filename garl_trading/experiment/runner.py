@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from garl_trading.backtest import run_portfolio
+from garl_trading.backtest import run_buy_and_hold, run_portfolio
 from garl_trading.config import FrameworkConfig
 from garl_trading.data import build_dataset, load_market_data
 from garl_trading.data.features import FEATURE_COLUMNS
@@ -18,7 +18,7 @@ from garl_trading.rl import (
     train_independent_ppo,
     train_joint_a2c,
     train_joint_dqn,
-    train_joint_ppo,
+    train_joint_ppo
 )
 from garl_trading.tuning import tune_forecaster, tune_rl_policy
 from garl_trading.validation import nested_folds, outer_folds
@@ -61,7 +61,7 @@ class ExperimentRunner:
         repetitions = cfg.experiment.repetitions
 
         for fold in evaluation_folds:
-            self.run_buy_hold(dataset, fold, store)
+            self.run_benchmarks(dataset, fold, store)
             for name in supervised:
                 self.run_supervised(name, dataset, fold, store)
             for name in rl_names:
@@ -114,12 +114,9 @@ class ExperimentRunner:
             "test_end": fold.test_end,
         }
 
-    def run_buy_hold(self, dataset, fold, store):
-        _, closes = self.frames(dataset, fold.test)
-        positions = pd.DataFrame(1.0, index=dataset.index[fold.test], columns=dataset.tickers)
-        result = self.backtest(closes, positions)
+    def save_result(self, store, metadata, positions, result):
         store.add_result(
-            metadata=self.metadata("buy_and_hold", fold, 0, self.config.experiment.seed),
+            metadata=metadata,
             metrics=result.metrics,
             positions=positions,
             equity=result.equity,
@@ -127,6 +124,33 @@ class ExperimentRunner:
             gross_returns=result.gross_returns,
             costs=result.costs,
             turnover=result.turnover,
+            cash_exposure=result.cash_exposure,
+        )
+
+    def run_benchmarks(self, dataset, fold, store):
+        _, closes = self.frames(dataset, fold.test)
+        close_frame = pd.DataFrame(closes)
+        execution = self.config.execution
+        buy_hold = run_buy_and_hold(
+            close_frame,
+            initial_capital=execution.initial_capital,
+            transaction_cost_bps=execution.transaction_cost_bps,
+            slippage_bps=execution.slippage_bps,
+        )
+        self.save_result(
+            store,
+            self.metadata("buy_and_hold", fold, 0, self.config.experiment.seed),
+            buy_hold.held_positions,
+            buy_hold,
+        )
+
+        positions = pd.DataFrame(1.0, index=dataset.index[fold.test], columns=dataset.tickers)
+        result = self.backtest(closes, positions)
+        self.save_result(
+            store,
+            self.metadata("equal_weight_rebalanced", fold, 0, self.config.experiment.seed),
+            positions,
+            result,
         )
 
     def run_supervised(self, name, dataset, fold, store):
@@ -164,6 +188,7 @@ class ExperimentRunner:
                         initial_capital=cfg.execution.initial_capital / len(dataset.tickers),
                         transaction_cost_bps=cfg.execution.transaction_cost_bps,
                         slippage_bps=cfg.execution.slippage_bps,
+                        short_borrow_bps_annual=cfg.execution.short_borrow_bps_annual,
                         objective_metric=cfg.tuning.objective,
                     )
                 if name in {"lstm", "tcn", "tft"}:
@@ -180,15 +205,11 @@ class ExperimentRunner:
                 )
             positions = pd.DataFrame(position_columns).reindex(dataset.index[fold.test])
             result = self.backtest(test_closes, positions)
-            store.add_result(
-                metadata=self.metadata(name, fold, 0, cfg.experiment.seed),
-                metrics=result.metrics,
-                positions=positions,
-                equity=result.equity,
-                returns=result.returns,
-                gross_returns=result.gross_returns,
-                costs=result.costs,
-                turnover=result.turnover,
+            self.save_result(
+                store,
+                self.metadata(name, fold, 0, cfg.experiment.seed),
+                positions,
+                result,
             )
         except Exception as exc:
             LOGGER.exception("%s failed on fold %s", name, fold.number)
@@ -212,12 +233,16 @@ class ExperimentRunner:
             "cost_rate": (cfg.execution.transaction_cost_bps + cfg.execution.slippage_bps) / 10000,
             "seed": seed,
             "device": cfg.models.device,
+            "short_borrow_bps_annual": cfg.execution.short_borrow_bps_annual,
+            "early_stopping_patience": cfg.models.early_stopping_patience,
+            "early_stopping_min_delta": cfg.models.early_stopping_min_delta,
+            "minimum_train_epochs": cfg.models.minimum_train_epochs,
         }
         try:
             tuning_key = (name, fold.number)
             if cfg.tuning.enabled:
                 if tuning_key not in self.rl_parameters:
-                    self.rl_parameters[tuning_key] = tune_rl_policy(
+                    selected = tune_rl_policy(
                         name,
                         train_features,
                         train_closes,
@@ -232,10 +257,18 @@ class ExperimentRunner:
                         initial_capital=cfg.execution.initial_capital,
                         transaction_cost_bps=cfg.execution.transaction_cost_bps,
                         slippage_bps=cfg.execution.slippage_bps,
+                        short_borrow_bps_annual=cfg.execution.short_borrow_bps_annual,
                         embargo_bars=cfg.validation.embargo_bars,
+                        early_stopping_patience=cfg.models.early_stopping_patience,
+                        early_stopping_min_delta=cfg.models.early_stopping_min_delta,
+                        minimum_train_epochs=cfg.models.minimum_train_epochs,
+                        garl_share_after_fraction=cfg.models.garl_share_after_fraction,
+                        garl_share_every=cfg.models.garl_share_every,
+                        garl_pool_size=cfg.models.garl_pool_size,
                         device=cfg.models.device,
                         objective_metric=cfg.tuning.objective,
                     )
+                    self.rl_parameters[tuning_key] = selected
                 common.update(self.rl_parameters[tuning_key])
             if name == "single_a2c":
                 policy = train_joint_a2c(train_features, train_closes, **common)
@@ -250,20 +283,29 @@ class ExperimentRunner:
             elif name == "independent_dqn":
                 policy = train_independent_dqn(train_features, train_closes, **common)
             elif name == "garl_ddal":
-                policy = train_garl_ddal(train_features, train_closes, **common)
+                policy = train_garl_ddal(
+                    train_features,
+                    train_closes,
+                    share_after_fraction=cfg.models.garl_share_after_fraction,
+                    share_every=cfg.models.garl_share_every,
+                    pool_size=cfg.models.garl_pool_size or None,
+                    **common,
+                )
             else:
                 raise KeyError(name)
-            positions = policy.positions(test_features, context=context_features)
+            metadata = self.metadata(name, fold, repetition, seed)
+            store.add_training_diagnostics(metadata, policy.diagnostics)
+            positions = policy.positions(
+                test_features,
+                context=context_features,
+                closes=test_closes,
+            )
             result = self.backtest(test_closes, positions)
-            store.add_result(
-                metadata=self.metadata(name, fold, repetition, seed),
-                metrics=result.metrics,
-                positions=positions,
-                equity=result.equity,
-                returns=result.returns,
-                gross_returns=result.gross_returns,
-                costs=result.costs,
-                turnover=result.turnover,
+            self.save_result(
+                store,
+                metadata,
+                positions,
+                result,
             )
         except Exception as exc:
             LOGGER.exception("%s failed on fold %s seed %s", name, fold.number, seed)

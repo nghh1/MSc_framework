@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 
 import numpy as np
@@ -7,6 +8,39 @@ import pandas as pd
 import torch
 from sklearn.preprocessing import StandardScaler
 from torch import nn
+
+
+class RewardEarlyStopper:
+    def __init__(self, patience: int, min_delta: float, minimum_epochs: int):
+        self.patience = patience
+        self.min_delta = min_delta
+        self.minimum_epochs = minimum_epochs
+        self.best = -np.inf
+        self.bad_epochs = 0
+        self.best_state = None
+
+    def update(self, epoch: int, reward: float, models) -> bool:
+        if reward > self.best + self.min_delta:
+            self.best = reward
+            self.bad_epochs = 0
+            if isinstance(models, dict):
+                self.best_state = {
+                    name: deepcopy(model.state_dict()) for name, model in models.items()
+                }
+            else:
+                self.best_state = deepcopy(models.state_dict())
+        else:
+            self.bad_epochs += 1
+        return epoch + 1 >= self.minimum_epochs and self.bad_epochs >= self.patience
+
+    def restore(self, models) -> None:
+        if self.best_state is None:
+            return
+        if isinstance(models, dict):
+            for name, model in models.items():
+                model.load_state_dict(self.best_state[name])
+        else:
+            models.load_state_dict(self.best_state)
 
 
 class ActorCritic(nn.Module):
@@ -31,7 +65,7 @@ class JointActorCritic(nn.Module):
             nn.Linear(per_asset_size * assets, hidden),
             nn.Tanh(),
             nn.Linear(hidden, hidden),
-            nn.Tanh(),
+            nn.Tanh()
         )
         self.policies = nn.ModuleList([nn.Linear(hidden, actions) for _ in range(assets)])
         self.value = nn.Linear(hidden, 1)
@@ -49,6 +83,7 @@ class TradingState:
     levels: np.ndarray
     lookback: int
     cost_rate: float
+    short_borrow_rate: float
     cursor: int
     position: float = 0.0
 
@@ -60,8 +95,17 @@ class TradingState:
         levels: np.ndarray,
         lookback: int,
         cost_rate: float,
+        short_borrow_rate: float
     ) -> TradingState:
-        return cls(features, closes, levels, lookback, cost_rate, lookback - 1)
+        return cls(
+            features,
+            closes,
+            levels,
+            lookback,
+            cost_rate,
+            short_borrow_rate,
+            lookback - 1
+        )
 
     def observation(self) -> np.ndarray:
         window = self.features[self.cursor - self.lookback + 1 : self.cursor + 1]
@@ -70,18 +114,19 @@ class TradingState:
     def step(self, action: int) -> tuple[np.ndarray, float, bool]:
         target = float(self.levels[action])
         next_return = self.closes[self.cursor + 1] / self.closes[self.cursor] - 1
-        reward = target * next_return - abs(target - self.position) * self.cost_rate
-        self.position = target
+        turnover_cost = abs(target - self.position) * self.cost_rate
+        borrow_cost = max(-target, 0.0) * self.short_borrow_rate
+        reward = target * next_return - turnover_cost - borrow_cost
+        self.position = target * (1 + next_return) / max(1 + reward, 1e-8)
         self.cursor += 1
         done = self.cursor >= len(self.closes) - 1
-        log_reward = float(np.log(max(1 + reward, 1e-8)))
         if done:
             return (
                 np.zeros(self.features.shape[1] * self.lookback + 1, dtype=np.float32),
-                log_reward,
+                float(reward),
                 True,
             )
-        return self.observation(), log_reward, False
+        return self.observation(), float(reward), False
 
     def reset(self) -> np.ndarray:
         self.cursor = self.lookback - 1
@@ -93,6 +138,21 @@ def fit_feature_scalers(features: dict[str, pd.DataFrame]) -> dict[str, Standard
     return {ticker: StandardScaler().fit(frame) for ticker, frame in features.items()}
 
 
+def initialise_asset_actor_critics(
+    tickers: tuple[str, ...],
+    observation_size: int,
+    actions: int,
+    seed: int,
+    device: torch.device
+) -> dict[str, ActorCritic]:
+    """Create matched but independently initialised stock agents for GARL and its ablation."""
+    models = {}
+    for agent_number, ticker in enumerate(tickers):
+        torch.manual_seed(seed + agent_number)
+        models[ticker] = ActorCritic(observation_size, actions).to(device)
+    return models
+
+
 def make_states(
     features: dict[str, pd.DataFrame],
     closes: dict[str, pd.Series],
@@ -100,6 +160,7 @@ def make_states(
     levels: tuple[float, ...],
     lookback: int,
     cost_rate: float,
+    short_borrow_bps_annual: float = 0.0
 ) -> dict[str, TradingState]:
     return {
         ticker: TradingState.create(
@@ -108,6 +169,7 @@ def make_states(
             np.asarray(levels, dtype=np.float32),
             lookback,
             cost_rate,
+            short_borrow_bps_annual / 10000 / 252
         )
         for ticker, frame in features.items()
     }
@@ -121,7 +183,7 @@ def a2c_gradient(
     rng: np.random.Generator,
     entropy_weight: float = 0.01,
     value_weight: float = 0.5,
-) -> tuple[list[torch.Tensor], float]:
+) -> tuple[list[torch.Tensor], float, float]:
     device = next(model.parameters()).device
     observations, actions, rewards, dones = [], [], [], []
     observation = state.observation()
@@ -167,7 +229,7 @@ def a2c_gradient(
         else torch.zeros_like(parameter)
         for parameter in model.parameters()
     ]
-    return gradients, float(loss.item())
+    return gradients, float(loss.item()), float(np.mean(rewards))
 
 
 def apply_gradient(
@@ -187,6 +249,9 @@ def greedy_asset_positions(
     context: pd.DataFrame,
     levels: tuple[float, ...],
     lookback: int,
+    closes: pd.Series | None = None,
+    cost_rate: float = 0.0,
+    short_borrow_rate: float = 0.0
 ) -> pd.Series:
     device = next(model.parameters()).device
     combined = pd.concat([context, features])
@@ -195,7 +260,9 @@ def greedy_asset_positions(
     location = {date: i for i, date in enumerate(combined.index)}
     current = 0.0
     output = {}
-    for date in features.index:
+    dates = list(features.index)
+    closes = closes.reindex(features.index) if closes is not None else None
+    for step, date in enumerate(dates):
         i = location[date]
         start = max(0, i - lookback + 1)
         window = values[start : i + 1]
@@ -207,4 +274,12 @@ def greedy_asset_positions(
         action = int(torch.argmax(logits, dim=-1).item())
         current = float(levels[action])
         output[date] = current
+        if closes is not None and step + 1 < len(dates):
+            next_return = float(closes.iloc[step + 1] / closes.iloc[step] - 1)
+            reward = (
+                current * next_return
+                - abs(current - observation[-1]) * cost_rate
+                - max(-current, 0.0) * short_borrow_rate
+            )
+            current = current * (1 + next_return) / max(1 + reward, 1e-8)
     return pd.Series(output)

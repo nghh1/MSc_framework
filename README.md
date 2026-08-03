@@ -9,7 +9,7 @@ Group-Agent Reinforcement Learning (GARL) with:
 - one joint agent controlling all stocks with A2C, PPO, or DQN;
 - independent per-stock agents using A2C, PPO, or DQN;
 - Group-Agent Reinforcement Learning (GARL) with deterministic DDAL-style gradient sharing; and
-- equal-weight buy-and-hold.
+- equal-weight buy-and-hold and a separately labelled daily equal-weight rebalanced benchmark.
 
 ## Research lineage
 
@@ -23,9 +23,12 @@ TCN refers to **Temporal Convolutional Network**. TFT refers to **Temporal Fusio
 this repository uses a simplified compact TFT implementation
 with variable gating, recurrent encoding, causal attention, and a point-forecast head.
 
-The primary research contract is **portfolio-to-portfolio comparison**. Every method emits a
-target-position matrix with dates as rows and tickers as columns. The same execution engine then
-applies one-bar delayed execution, trading costs, slippage, and optional short-borrow costs.
+The primary research contract is **portfolio-to-portfolio comparison**. Every active method emits a
+target-position matrix with dates as rows and tickers as columns. Each stock controls a fixed
+equal-capital sleeve, and the same drift-aware sleeve transition is used by RL training and final
+execution for one-bar delay, trading costs, slippage, and short-borrow costs.
+Uninvested cash has zero return. Buy-and-hold uses one initial equal-capital purchase and fixed
+shares; it is not silently rebalanced every day.
 
 ## Design corrections built into this reconstruction
 
@@ -33,13 +36,16 @@ applies one-bar delayed execution, trading costs, slippage, and optional short-b
 - Model selection occurs before an optional untouched final holdout.
 - Every baseline receives the same portfolio capital and test dates.
 - Rolling ARIMAX uses the same causal online-update behavior during tuning and evaluation.
-- RL methods are evaluated across repeated seeds.
-- GARL agents start from an aligned parameter state before gradients are shared.
-- Buy-and-hold is produced in the same experiment run from the same price snapshot.
+- RL methods are evaluated across 10 repeated seeds.
+- GARL and independent A2C use the same reproducible per-stock initialisation contract: agents are
+  different from each other, while corresponding agents match across the direct ablation.
+- Buy-and-hold and daily equal-weight rebalancing are distinct benchmarks produced from the same
+  price snapshot.
 - ADX(14) and ROC(20) extend the causal indicators without duplicating the existing ROC(10), which
   is already represented by `ret_10`.
-- Results, daily net/gross returns and costs, positions, equity curves, configuration, and data
-  hashes are written to `artifacts/`.
+- RL training reward/loss diagnostics and early-stopping decisions are retained with the results.
+- Results, daily net/gross returns, costs, positions, equity curves, configuration, and
+  the downloaded data snapshots are written to `results/`.
 - Reporting is independent from training and consumes tidy artifact tables.
 
 ## Quick start
@@ -53,34 +59,37 @@ pip install -e ".[dev]"
 garl-trading run --config configs/default.toml
 
 # Build the report again from an existing run
-garl-trading report --run-dir artifacts/<run-id>
+garl-trading report --run-dir results/<run-id>
 
 pytest
 ```
 
 See [the model rationale](docs/MODEL_RATIONALE.md),
 [reporting rationale](docs/REPORTING_RATIONALE.md), and [full runbook](docs/RUNBOOK.md) before the
-dissertation run. The GARL implementation is a controlled single-process emulation of DDAL's
-gradient-sharing mechanism, not a wall-clock asynchronous distributed deployment.
+dissertation run. GARL uses deterministic event-driven local clocks and FIFO knowledge queues to
+reproduce DDAL's decentralised asynchronous algorithm without requiring distributed hardware.
 
-All experiments use downloaded Yahoo Finance data. The normalized price snapshot is cached and
-hashed so later reporting does not silently use revised market data.
+All experiments use downloaded Yahoo Finance stock data. The normalized price snapshot is saved
+with each run so reporting does not download revised market data.
 
 ## Expect artifact layout
 
 ```text
-artifacts/<run-id>/
+results/<run-id>/
   manifest.json
   config.toml
   data/
+    prices.csv
   metrics.csv
   positions.csv
   equity.csv
   daily_returns.csv
+  training_diagnostics.csv
   failures.csv
   report/
     data_split_timeline.png
     cumulative_returns_net.png
+    active_cumulative_returns_net.png
     sharpe_ranking.png
     sharpe_over_time.png
     fold_stability.png
@@ -88,6 +97,9 @@ artifacts/<run-id>/
     turnover.png
     cost_sensitivity.png
     crash_period_cumulative_returns.png
+    training_reward.png
+    training_loss.png
+    training_summary.csv
     performance_comparison.csv
     performance_comparison.md
     sharpe_over_time.csv

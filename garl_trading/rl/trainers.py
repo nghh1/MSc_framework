@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
@@ -11,13 +11,14 @@ from torch import nn
 from garl_trading.utils import resolve_torch_device
 
 from .core import (
-    ActorCritic,
     JointActorCritic,
+    RewardEarlyStopper,
     a2c_gradient,
     apply_gradient,
     fit_feature_scalers,
     greedy_asset_positions,
-    make_states,
+    initialise_asset_actor_critics,
+    make_states
 )
 
 
@@ -29,12 +30,18 @@ class RLPolicySet:
     tickers: tuple[str, ...]
     levels: tuple[float, ...]
     lookback: int
+    cost_rate: float = 0.0
+    short_borrow_rate: float = 0.0
+    diagnostics: list[dict] = field(default_factory=list)
 
     def positions(
-        self, features: dict[str, pd.DataFrame], context: dict[str, pd.DataFrame]
+        self,
+        features: dict[str, pd.DataFrame],
+        context: dict[str, pd.DataFrame],
+        closes: dict[str, pd.Series] | None = None
     ) -> pd.DataFrame:
         if self.kind == "joint":
-            return joint_positions(self, features, context)
+            return joint_positions(self, features, context, closes=closes)
         series = {
             ticker: greedy_asset_positions(
                 self.models[ticker],
@@ -43,6 +50,9 @@ class RLPolicySet:
                 context[ticker],
                 self.levels,
                 self.lookback,
+                closes[ticker] if closes is not None else None,
+                self.cost_rate,
+                self.short_borrow_rate,
             )
             for ticker in self.tickers
         }
@@ -61,31 +71,66 @@ def train_independent_a2c(
     cost_rate: float,
     seed: int,
     device: str = "auto",
+    short_borrow_bps_annual: float = 0.0,
+    early_stopping_patience: int = 15,
+    early_stopping_min_delta: float = 1e-4,
+    minimum_train_epochs: int = 30
 ) -> RLPolicySet:
     device = resolve_torch_device(device)
     tickers = tuple(features)
     scalers = fit_feature_scalers(features)
     states = make_states(
-        features, closes, scalers, levels=levels, lookback=lookback, cost_rate=cost_rate
+        features, closes, scalers, levels=levels, lookback=lookback, cost_rate=cost_rate,
+        short_borrow_bps_annual=short_borrow_bps_annual
     )
-    models, optimizers, randoms = {}, {}, {}
+    observation_size = features[tickers[0]].shape[1] * lookback + 1
+    models = initialise_asset_actor_critics(
+        tickers, observation_size, len(levels), seed, device
+    )
+    optimizers, randoms = {}, {}
     for i, ticker in enumerate(tickers):
-        torch.manual_seed(seed + i)
-        observation_size = features[ticker].shape[1] * lookback + 1
-        models[ticker] = ActorCritic(observation_size, len(levels)).to(device)
         optimizers[ticker] = torch.optim.Adam(models[ticker].parameters(), lr=learning_rate)
         randoms[ticker] = np.random.default_rng(seed + i)
-    for _ in range(epochs):
+    diagnostics = []
+    stopper = RewardEarlyStopper(
+        early_stopping_patience, early_stopping_min_delta, minimum_train_epochs
+    )
+    for epoch in range(epochs):
+        losses, rewards = [], []
         for ticker in tickers:
-            gradients, _ = a2c_gradient(
+            gradients, loss, reward = a2c_gradient(
                 models[ticker],
                 states[ticker],
                 rollout_length=rollout_length,
                 gamma=gamma,
-                rng=randoms[ticker],
+                rng=randoms[ticker]
             )
             apply_gradient(models[ticker], optimizers[ticker], gradients)
-    return RLPolicySet("independent", models, scalers, tickers, levels, lookback)
+            losses.append(loss)
+            rewards.append(reward)
+        diagnostics.append(
+            {
+                "epoch": epoch,
+                "training_reward": float(np.mean(rewards)),
+                "loss": float(np.mean(losses))
+            }
+        )
+        smoothed = float(np.mean([row["training_reward"] for row in diagnostics[-5:]]))
+        if stopper.update(epoch, smoothed, models):
+            diagnostics[-1]["early_stopped"] = True
+            break
+    stopper.restore(models)
+    return RLPolicySet(
+        "independent",
+        models,
+        scalers,
+        tickers,
+        levels,
+        lookback,
+        cost_rate,
+        short_borrow_bps_annual / 10000 / 252,
+        diagnostics
+    )
 
 
 def train_joint_a2c(
@@ -100,11 +145,18 @@ def train_joint_a2c(
     cost_rate: float,
     seed: int,
     device: str = "auto",
+    short_borrow_bps_annual: float = 0.0,
+    early_stopping_patience: int = 15,
+    early_stopping_min_delta: float = 1e-4,
+    minimum_train_epochs: int = 30
 ) -> RLPolicySet:
     device = resolve_torch_device(device)
     tickers = tuple(features)
     scalers = fit_feature_scalers(features)
-    states = make_states(features, closes, scalers, levels, lookback, cost_rate)
+    states = make_states(
+        features, closes, scalers, levels, lookback, cost_rate,
+        short_borrow_bps_annual=short_borrow_bps_annual
+    )
     per_asset_size = features[tickers[0]].shape[1] * lookback + 1
     torch.manual_seed(seed)
     model = JointActorCritic(per_asset_size, len(tickers), len(levels)).to(device)
@@ -112,7 +164,11 @@ def train_joint_a2c(
     rng = np.random.default_rng(seed)
     observations = {ticker: states[ticker].observation() for ticker in tickers}
 
-    for _ in range(epochs):
+    diagnostics = []
+    stopper = RewardEarlyStopper(
+        early_stopping_patience, early_stopping_min_delta, minimum_train_epochs
+    )
+    for epoch in range(epochs):
         obs_buffer, action_buffer, reward_buffer, done_buffer = [], [], [], []
         for _ in range(rollout_length):
             joint_obs = np.concatenate([observations[ticker] for ticker in tickers])
@@ -158,12 +214,38 @@ def train_joint_a2c(
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
-    return RLPolicySet("joint", model, scalers, tickers, levels, lookback)
+        diagnostics.append(
+            {
+                "epoch": epoch,
+                "training_reward": float(np.mean(reward_buffer)),
+                "loss": float(loss.item()),
+                "entropy": float(entropy.item())
+            }
+        )
+        smoothed = float(np.mean([row["training_reward"] for row in diagnostics[-5:]]))
+        if stopper.update(epoch, smoothed, model):
+            diagnostics[-1]["early_stopped"] = True
+            break
+    stopper.restore(model)
+    return RLPolicySet(
+        "joint",
+        model,
+        scalers,
+        tickers,
+        levels,
+        lookback,
+        cost_rate,
+        short_borrow_bps_annual / 10000 / 252,
+        diagnostics
+    )
 
 
 @torch.no_grad()
 def joint_positions(
-    policy: RLPolicySet, features: dict[str, pd.DataFrame], context: dict[str, pd.DataFrame]
+    policy: RLPolicySet,
+    features: dict[str, pd.DataFrame],
+    context: dict[str, pd.DataFrame],
+    closes: dict[str, pd.Series] | None = None,
 ) -> pd.DataFrame:
     model = policy.models
     device = next(model.parameters()).device
@@ -178,7 +260,12 @@ def joint_positions(
     current = {ticker: 0.0 for ticker in policy.tickers}
     rows = []
     index = features[policy.tickers[0]].index
-    for date in index:
+    aligned_closes = (
+        {ticker: closes[ticker].reindex(index) for ticker in policy.tickers}
+        if closes is not None
+        else None
+    )
+    for step, date in enumerate(index):
         observations = []
         for ticker in policy.tickers:
             i = locations[ticker][date]
@@ -198,4 +285,19 @@ def joint_positions(
             current[ticker] = float(policy.levels[action])
             row[ticker] = current[ticker]
         rows.append(row)
+        if aligned_closes is not None and step + 1 < len(index):
+            for ticker in policy.tickers:
+                next_return = float(
+                    aligned_closes[ticker].iloc[step + 1]
+                    / aligned_closes[ticker].iloc[step]
+                    - 1
+                )
+                target = row[ticker]
+                previous = observations[policy.tickers.index(ticker)][-1]
+                reward = (
+                    target * next_return
+                    - abs(target - previous) * policy.cost_rate
+                    - max(-target, 0.0) * policy.short_borrow_rate
+                )
+                current[ticker] = target * (1 + next_return) / max(1 + reward, 1e-8)
     return pd.DataFrame(rows, index=index)

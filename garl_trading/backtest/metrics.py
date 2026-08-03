@@ -13,6 +13,7 @@ def summarise(
     turnover: pd.Series,
     gross_returns: pd.Series | None = None,
     costs: pd.Series | None = None,
+    cash_exposure: pd.Series | None = None,
 ) -> dict[str, float]:
     volatility = returns.std(ddof=1)
     downside = returns.clip(upper=0)
@@ -51,6 +52,7 @@ def summarise(
         "turnover_annual": float(turnover.mean() * TRADING_DAYS),
         "gross_exposure": float(positions.abs().mean(axis=1).mean()),
         "net_exposure": float(positions.mean(axis=1).mean()),
+        "cash_exposure": float(cash_exposure.mean()) if cash_exposure is not None else 0.0,
         "positive_day_rate": float((nonzero > 0).mean()) if len(nonzero) else 0.0,
         "profit_factor": float(returns[returns > 0].sum() / losses) if losses else 0.0,
         "value_at_risk_95": value_at_risk,

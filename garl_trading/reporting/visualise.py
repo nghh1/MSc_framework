@@ -12,10 +12,11 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from garl_trading.backtest import run_portfolio
+from garl_trading.backtest import run_buy_and_hold, run_portfolio
 
 COLOURS = {
     "buy_and_hold": "#8A94A6",
+    "equal_weight_rebalanced": "#5F6B7A",
     "arimax_static": "#4378BF",
     "arimax_rolling": "#2457A6",
     "random_forest": "#29A37A",
@@ -42,6 +43,7 @@ SUMMARY_METRICS = [
     "calmar",
     "turnover_daily",
     "gross_exposure",
+    "cash_exposure",
     "cost_drag",
 ]
 
@@ -106,10 +108,19 @@ def plot_sharpe_ranking(report: pd.DataFrame, path: Path) -> None:
     names = report["baseline"].tolist()
     fig, axis = plt.subplots(figsize=(10, max(5, 0.42 * len(names))), constrained_layout=True)
     y = np.arange(len(names))
+    xerr = report["sharpe_ci"].to_numpy()
+    if {"sharpe_ci_lower", "sharpe_ci_upper"}.issubset(report.columns):
+        means = report["sharpe_mean"].to_numpy()
+        xerr = np.vstack(
+            [
+                np.maximum(means - report["sharpe_ci_lower"].to_numpy(), 0),
+                np.maximum(report["sharpe_ci_upper"].to_numpy() - means, 0),
+            ]
+        )
     axis.barh(
         y,
         report["sharpe_mean"],
-        xerr=report["sharpe_ci"],
+        xerr=xerr,
         color=[colour(name) for name in names],
         capsize=3,
     )
@@ -152,8 +163,14 @@ def _chosen_equity(equity: pd.DataFrame) -> tuple[pd.DataFrame, str]:
     return chosen, label
 
 
-def plot_cumulative_returns(equity: pd.DataFrame, path: Path) -> None:
+def plot_cumulative_returns(
+    equity: pd.DataFrame, path: Path, *, exclude_benchmarks: bool = False
+) -> None:
     chosen, label = _chosen_equity(equity)
+    if exclude_benchmarks:
+        chosen = chosen[
+            ~chosen["baseline"].isin({"buy_and_hold", "equal_weight_rebalanced"})
+        ]
     fig, axis = plt.subplots(figsize=(11, 6), constrained_layout=True)
     for baseline, group in chosen.groupby("baseline"):
         curves = group.pivot_table(index="date", columns="repetition", values="equity")
@@ -162,7 +179,8 @@ def plot_cumulative_returns(equity: pd.DataFrame, path: Path) -> None:
         axis.plot(cumulative.index, cumulative, label=baseline, color=colour(baseline), lw=1.5)
     axis.axhline(0, color="#333333", linewidth=0.8)
     axis.set_ylabel("Net cumulative return")
-    axis.set_title(f"Cumulative returns after transaction costs — {label}")
+    prefix = "Active-strategy " if exclude_benchmarks else ""
+    axis.set_title(f"{prefix}cumulative returns after transaction costs — {label}")
     _format_dates(axis)
     _style_axis(axis)
     axis.legend(fontsize=8, ncol=2)
@@ -180,6 +198,38 @@ def plot_turnover(report: pd.DataFrame, path: Path) -> None:
     axis.set_title("Average daily turnover")
     _style_axis(axis)
     _save(fig, path)
+
+
+def plot_training_diagnostic(
+    diagnostics: pd.DataFrame, value: str, path: Path, ylabel: str
+) -> None:
+    if diagnostics.empty or value not in diagnostics:
+        return
+    fig, axis = plt.subplots(figsize=(11, 6), constrained_layout=True)
+    grouped = diagnostics.groupby(["baseline", "epoch"], as_index=False)[value].mean()
+    for baseline, frame in grouped.groupby("baseline"):
+        axis.plot(frame["epoch"], frame[value], label=baseline, color=colour(baseline), lw=1.4)
+    axis.set_xlabel("Training epoch")
+    axis.set_ylabel(ylabel)
+    axis.set_title(f"RL {ylabel.lower()} during training")
+    _style_axis(axis)
+    axis.legend(fontsize=8, ncol=2)
+    _save(fig, path)
+
+
+def training_summary(diagnostics: pd.DataFrame) -> pd.DataFrame:
+    if diagnostics.empty:
+        return pd.DataFrame()
+    keys = ["baseline", "fold", "repetition", "seed"]
+    runs = diagnostics.groupby(keys, as_index=False).agg(
+        epochs_completed=("epoch", lambda values: int(values.max()) + 1),
+        best_training_reward=("training_reward", "max"),
+        final_training_reward=("training_reward", "last"),
+    )
+    if "early_stopped" in diagnostics:
+        stopped = diagnostics.groupby(keys)["early_stopped"].any().rename("early_stopped")
+        runs = runs.merge(stopped.reset_index(), on=keys, how="left")
+    return runs
 
 
 def plot_fold_stability(metrics: pd.DataFrame, path: Path) -> pd.DataFrame:
@@ -301,7 +351,9 @@ def cost_sensitivity(run_dir: Path, positions: pd.DataFrame, path: Path | None) 
     prices = pd.read_csv(run_dir / "data" / "prices.csv", parse_dates=["date"])
     closes = prices.pivot(index="date", columns="ticker", values="close").sort_index()
     manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
-    initial_capital = manifest["config"]["execution"]["initial_capital"]
+    execution = manifest["config"]["execution"]
+    initial_capital = execution["initial_capital"]
+    borrow_bps = execution.get("short_borrow_bps_annual", 0.0)
     rows = []
     keys = ["baseline", "fold", "fold_kind", "repetition", "seed"]
     for key, group in positions.groupby(keys, dropna=False):
@@ -309,13 +361,22 @@ def cost_sensitivity(run_dir: Path, positions: pd.DataFrame, path: Path | None) 
         matrix = group.pivot(index="date", columns="ticker", values="position")
         close_window = closes.reindex(index=matrix.index, columns=matrix.columns)
         for total_cost in (0, 5, 10, 20, 40):
-            result = run_portfolio(
-                close_window,
-                matrix,
-                initial_capital=initial_capital,
-                transaction_cost_bps=total_cost,
-                slippage_bps=0,
-            )
+            if metadata["baseline"] == "buy_and_hold":
+                result = run_buy_and_hold(
+                    close_window,
+                    initial_capital=initial_capital,
+                    transaction_cost_bps=total_cost,
+                    slippage_bps=0,
+                )
+            else:
+                result = run_portfolio(
+                    close_window,
+                    matrix,
+                    initial_capital=initial_capital,
+                    transaction_cost_bps=total_cost,
+                    slippage_bps=0,
+                    short_borrow_bps_annual=borrow_bps,
+                )
             rows.append({**metadata, "cost_bps": total_cost, "sharpe": result.metrics["sharpe"]})
     sensitivity = pd.DataFrame(rows)
     if path is not None:
@@ -375,6 +436,8 @@ def build_report(
     positions = pd.read_csv(run_dir / "positions.csv", parse_dates=["date"])
     daily_path = run_dir / "daily_returns.csv"
     daily = pd.read_csv(daily_path, parse_dates=["date"]) if daily_path.exists() else pd.DataFrame()
+    diagnostics_path = run_dir / "training_diagnostics.csv"
+    diagnostics = pd.read_csv(diagnostics_path) if diagnostics_path.exists() else pd.DataFrame()
 
     report = summary(metrics, confidence)
     comparison = performance_table(report)
@@ -384,12 +447,15 @@ def build_report(
         positions,
         report_dir / "cost_sensitivity.png" if "png" in formats else None,
     )
+    diagnostic_summary = training_summary(diagnostics)
 
     if "csv" in formats:
         report.to_csv(report_dir / "summary.csv", index=False)
         comparison.to_csv(report_dir / "performance_comparison.csv", index=False)
         sharpe_table.to_csv(report_dir / "sharpe_over_time.csv", index=False)
         sensitivity.to_csv(report_dir / "cost_sensitivity.csv", index=False)
+        if not diagnostic_summary.empty:
+            diagnostic_summary.to_csv(report_dir / "training_summary.csv", index=False)
     if "md" in formats:
         (report_dir / "performance_comparison.md").write_text(
             markdown_table(comparison), encoding="utf-8"
@@ -403,29 +469,52 @@ def build_report(
         plot_sharpe_ranking(report, report_dir / "sharpe_ranking.png")
         plot_return_drawdown(report, report_dir / "return_vs_drawdown.png")
         plot_cumulative_returns(equity, report_dir / "cumulative_returns_net.png")
+        plot_cumulative_returns(
+            equity,
+            report_dir / "active_cumulative_returns_net.png",
+            exclude_benchmarks=True,
+        )
         plot_turnover(report, report_dir / "turnover.png")
         plot_fold_stability(metrics, report_dir / "fold_stability.png")
         plot_split_timeline(metrics, report_dir / "data_split_timeline.png")
         plot_sharpe_over_time(sharpe_table, report_dir / "sharpe_over_time.png")
         crash_year = plot_crash_period(daily, report_dir / "crash_period_cumulative_returns.png")
+        if not diagnostics.empty:
+            plot_training_diagnostic(
+                diagnostics,
+                "training_reward",
+                report_dir / "training_reward.png",
+                "Mean training reward",
+            )
+            plot_training_diagnostic(
+                diagnostics,
+                "loss",
+                report_dir / "training_loss.png",
+                "Mean optimisation loss",
+            )
 
     scope = report["scope"].iloc[0].replace("_", " ") if len(report) else "unavailable"
     crash_note = (
-        f"The optional crash-period figure uses {crash_year}, the worst available buy-and-hold year."
+        f"The optional crash-period figure uses {crash_year}, the worst available "
+        "buy-and-hold year."
         if crash_year is not None
         else "The crash-period figure was skipped because daily return artifacts were unavailable."
     )
     narrative = (
         "# Experiment summary\n\n"
         f"Headline scope: {scope}. Confidence level: {confidence:.0%}. "
-        "All equity and cumulative-return figures are net of configured transaction costs and slippage.\n\n"
+        "All equity and cumulative-return figures are net of configured transaction costs, "
+        "slippage, and short-borrow costs. Sharpe and Sortino ratios assume a zero risk-free "
+        "rate.\n\n"
         "## Performance comparison\n\n"
         f"{markdown_table(comparison)}\n\n"
         "## Reporting design\n\n"
         "Each analytical view is saved as a separate figure so it can be placed, captioned, and "
         "scaled independently in the dissertation. The split timeline documents the experimental "
-        "protocol; Sharpe ranking and fold paths address level and stability; net cumulative returns "
-        "show economic magnitude; drawdown, turnover, and cost sensitivity cover risk and implementability.\n\n"
+        "protocol; Sharpe ranking and fold paths address level and stability; net cumulative "
+        "returns show economic magnitude; drawdown, turnover, and cost sensitivity cover risk "
+        "and implementability. The active-only cumulative-return figure prevents the passive "
+        "benchmark from compressing differences among trading strategies.\n\n"
         f"{crash_note}\n"
     )
     if "md" in formats:

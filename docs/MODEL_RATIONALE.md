@@ -8,9 +8,11 @@ changes in response to test performance.
 
 Every supervised model forecasts the next trading-day return for one stock. Forecasts are mapped
 continuously to `[-1, 1]` positions using a training-target volatility scale. Every RL policy selects
-one of `[-1, -0.5, 0, 0.5, 1]`. All target positions then enter the same equal-weight portfolio
-engine, which delays execution by one bar and applies turnover-dependent transaction costs and
-slippage. This common layer is more important for fairness than making every model equally large.
+one of `[-1, -0.5, 0, 0.5, 1]`. Each stock controls one fixed equal-capital sleeve. RL training and
+backtesting use the same sleeve transition: the current exposure drifts with realised return, the
+next target trades from that drifted exposure, and transaction, slippage, and short-borrow costs are
+deducted before the sleeve returns are averaged. This exact shared contract is more important for
+fairness than making every model equally large.
 
 The 20-day lookback represents roughly one trading month. Hidden dimensions are deliberately
 small and tuned only on inner folds because daily equity data provide thousands, not millions, of
@@ -68,24 +70,45 @@ but avoid negative transfer and provide the cleanest control for GARL.
 - A2C is the direct on-policy actor-critic reference and the base learner used by GARL.
 - PPO adds clipped policy updates and generalised advantage estimation, testing whether improved
   on-policy stability explains performance.
-- DQN adds replay, epsilon-greedy exploration, and target networks, testing a value-based learner
-  under the same discrete actions.
+- DQN adds replay, epsilon-greedy exploration, and target networks. The joint version is a branching
+  DQN with one Q-value head per stock and a shared representation; it is not an exhaustive joint
+  action-value table over all `5^N` portfolio actions.
 
 PPO and DQN are non-GARL baselines; they are not presented as extensions of Wu and Zeng's method.
 
 ## GARL and DDAL
 
-GARL assigns one A2C agent to each stock-specific environment. Agents begin from the same parameter
-state, first learn privately, and later share timestamped gradient pieces. DDAL weights selected
-pieces by training maturity and task relevance; this implementation uses absolute training-return
-correlation as a pre-declared stock-task relevance proxy. `independent_a2c` is therefore the direct
-no-sharing ablation.
+GARL assigns one A2C agent to each stock-specific environment. Agents are independently initialised
+with seeds `seed + stock_index`; independent A2C uses the identical construction, so corresponding
+agents start alike across methods while agents within either method remain different. GARL agents
+first learn privately and later share timestamped gradient pieces. DDAL weights retrieved pieces by
+training maturity and task relevance; absolute training-return correlation is the pre-declared
+stock-task relevance proxy. `independent_a2c` is therefore the direct no-sharing ablation.
 
-The code is a deterministic, single-process DDAL-style emulation. Gradient generation is scheduled
-in epochs and exchange occurs every configured sharing interval; it is not a wall-clock asynchronous
-distributed system. This distinction must be stated as a limitation. The implementation follows the
-gradient-pool and weighted-average mechanism in Wu and Zeng's GARL paper:
+The code reproduces Algorithm 1 with deterministic event-driven asynchrony. Every agent has an
+independent simulated clock, local epoch, environment, model, optimiser, and FIFO knowledge queue.
+After the private-learning threshold, every generated gradient is copied to every queue. Each agent
+independently retrieves and removes queued gradients on its own update schedule and applies the
+paper's experience/relevance weighted average. This reproduces learning semantics but simulates
+network/process timing in one process rather than claiming measured distributed-system speed. The
+implementation follows the mechanism in Wu and Zeng's GARL paper:
 <https://arxiv.org/abs/2202.05135>.
+
+Sharing begins after 30% of each agent's local epochs and each agent independently consumes its
+FIFO queue every four local epochs. `garl_pool_size = 0` means that all currently queued pieces are
+retrieved, matching the paper's experimental interpretation of `m` as the available pool size.
+
+## RL tuning, stopping, and diagnostics
+
+RL tuning exhaustively evaluates the nine combinations of rollout length `{16, 32, 64}` and
+learning-rate multiplier `{1/3, 1, 3}` on the latest embargoed pre-test validation segment. The same
+budget applies to every RL method and selected settings are reused for all ten evaluation seeds.
+
+Training monitors a five-epoch moving mean reward. After at least 30 epochs, training stops when the
+moving reward has not improved by `0.0001` for 15 epochs, and restores the best model state. GARL
+applies this rule independently to each autonomous agent. Reward, loss, entropy or epsilon where
+applicable, asynchronous queue size, and sharing events are saved for diagnosis. Loss magnitudes are
+algorithm-specific and must not be ranked across A2C, PPO, and DQN.
 
 ## Indicators: ADX and ROC
 

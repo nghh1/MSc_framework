@@ -14,7 +14,7 @@ from garl_trading.rl import (
     train_independent_ppo,
     train_joint_a2c,
     train_joint_dqn,
-    train_joint_ppo,
+    train_joint_ppo
 )
 
 
@@ -33,9 +33,16 @@ def tune_rl_policy(
     initial_capital: float,
     transaction_cost_bps: float,
     slippage_bps: float,
+    short_borrow_bps_annual: float,
     embargo_bars: int,
+    early_stopping_patience: int,
+    early_stopping_min_delta: float,
+    minimum_train_epochs: int,
+    garl_share_after_fraction: float,
+    garl_share_every: int,
+    garl_pool_size: int,
     device: str = "auto",
-    objective_metric: str = "sharpe",
+    objective_metric: str = "sharpe"
 ) -> dict:
     """Tune RL settings on the latest causal inner validation segment."""
     n = len(next(iter(features.values())))
@@ -53,7 +60,7 @@ def tune_rl_policy(
         "independent_a2c": train_independent_a2c,
         "independent_ppo": train_independent_ppo,
         "independent_dqn": train_independent_dqn,
-        "garl_ddal": train_garl_ddal,
+        "garl_ddal": train_garl_ddal
     }
     trainer = trainers[name]
     train_features = {t: frame.iloc[train_positions] for t, frame in features.items()}
@@ -69,9 +76,16 @@ def tune_rl_policy(
             "rollout_length": trial.suggest_categorical("rollout_length", [16, 32, 64]),
             "learning_rate": trial.suggest_float(
                 "learning_rate", learning_rate / 3, learning_rate * 3, log=True
-            ),
+            )
         }
         try:
+            algorithm_parameters = {}
+            if name == "garl_ddal":
+                algorithm_parameters = {
+                    "share_after_fraction": garl_share_after_fraction,
+                    "share_every": garl_share_every,
+                    "pool_size": garl_pool_size or None
+                }
             policy = trainer(
                 train_features,
                 train_closes,
@@ -82,21 +96,38 @@ def tune_rl_policy(
                 cost_rate=cost_rate,
                 seed=seed,
                 device=device,
-                **params,
+                short_borrow_bps_annual=short_borrow_bps_annual,
+                early_stopping_patience=min(early_stopping_patience, tune_epochs),
+                early_stopping_min_delta=early_stopping_min_delta,
+                minimum_train_epochs=min(minimum_train_epochs, tune_epochs),
+                **algorithm_parameters,
+                **params
             )
-            positions = policy.positions(validation_features, context=context)
+            positions = policy.positions(
+                validation_features,
+                context=context,
+                closes=validation_closes
+            )
             result = run_portfolio(
                 pd.DataFrame(validation_closes),
                 positions,
                 initial_capital,
                 transaction_cost_bps,
                 slippage_bps=slippage_bps,
+                short_borrow_bps_annual=short_borrow_bps_annual
             )
             score = result.metrics[objective_metric]
             return float(score) if np.isfinite(score) else -10.0
         except Exception:  # noqa: BLE001 - invalid trial configurations are penalised
             return -10.0
 
-    study = optuna.create_study(direction="maximize", sampler=optuna.samplers.TPESampler(seed=seed))
-    study.optimize(objective, n_trials=trials, show_progress_bar=False)
+    search_space = {
+        "rollout_length": [16, 32, 64],
+        "learning_rate": [learning_rate / 3, learning_rate, learning_rate * 3],
+    }
+    study = optuna.create_study(
+        direction="maximize",
+        sampler=optuna.samplers.GridSampler(search_space, seed=seed),
+    )
+    study.optimize(objective, n_trials=min(trials, 9), show_progress_bar=False)
     return study.best_params

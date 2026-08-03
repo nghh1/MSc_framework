@@ -30,6 +30,7 @@ def normalise(frame: pd.DataFrame, ticker: str) -> pd.DataFrame:
 def download_yahoo(
     tickers: Iterable[str], start: str, end: str, adjust_prices: bool = True, retries: int = 3
 ) -> dict[str, pd.DataFrame]:
+    inclusive_end = (pd.Timestamp(end) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
     result: dict[str, pd.DataFrame] = {}
     for ticker in tickers:
         error: Exception | None = None
@@ -38,7 +39,7 @@ def download_yahoo(
                 raw = yf.download(
                     ticker,
                     start=start,
-                    end=end,
+                    end=inclusive_end,
                     auto_adjust=adjust_prices,
                     progress=False,
                     threads=False,

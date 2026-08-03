@@ -77,7 +77,7 @@ reconstructed framework. The framework itself is:
 
 | File | Function |
 |---|---|
-| `.gitignore` | Excludes virtual environments, Python caches, downloaded data caches, and generated `artifacts/`. |
+| `.gitignore` | Excludes virtual environments, Python caches, downloaded data caches, and generated `results/`. |
 | `README.md` | Installation, research terminology, design principles, run commands, and artifact overview. |
 | `PROJECT_STRUCTURE.md` | Annotated inventory of the reconstructed project and full-run outputs. |
 | `pyproject.toml` | Package metadata, Python dependencies, CLI entry point, pytest settings, and Ruff settings. |
@@ -100,17 +100,17 @@ reconstructed framework. The framework itself is:
 
 | File | Function |
 |---|---|
-| `data/providers.py` | Downloads adjusted real OHLCV data from Yahoo Finance, retries vendor failures, normalizes columns/indexes, and validates prices. It contains no synthetic provider. |
+| `data/providers.py` | Downloads adjusted real OHLCV data from Yahoo Finance, uses inclusive requested end dates, normalizes columns/indexes, and validates prices. It contains no synthetic provider. |
 | `data/features.py` | Builds causal momentum, trend, ADX(14), ROC(20), oscillator, volatility, volume, and OBV indicators plus the next-bar return target. |
-| `data/dataset.py` | Creates the aligned multi-stock dataset, removes all feature warm-up rows before folds are computed, and hashes the exact normalized price snapshot. |
+| `data/dataset.py` | Creates the aligned multi-stock dataset and removes all feature warm-up rows before folds are computed. |
 
 ### Validation and execution
 
 | File | Function |
 |---|---|
 | `validation/walk_forward.py` | Constructs capped, purged/embargoed inner and outer walk-forward folds plus the optional untouched final holdout. |
-| `backtest/engine.py` | Converts every model’s target-position matrix into the same equal-weight portfolio using one-bar delayed execution, turnover costs, slippage, and optional borrow costs. |
-| `backtest/metrics.py` | Calculates return, volatility, tail/path risk, drawdown, turnover, exposure, and implementation-cost metrics. |
+| `backtest/engine.py` | Executes fixed equal-capital stock sleeves with the same drift-aware transition used by RL training, plus one-bar delay, zero-return cash, costs, and short borrow; separately executes true fixed-share buy-and-hold. |
+| `backtest/metrics.py` | Calculates return, zero-risk-free Sharpe/Sortino, volatility, tail/path risk, drawdown, turnover, cash/risky exposure, and implementation-cost metrics. |
 
 ### Supervised models
 
@@ -126,10 +126,10 @@ reconstructed framework. The framework itself is:
 
 | File | Function |
 |---|---|
-| `rl/core.py` | Shared actor-critic networks, trading state, feature scaling, A2C gradient calculation, and deterministic position inference. |
+| `rl/core.py` | Shared networks, exact sleeve state, matched GARL/ablation initialisation, reward-based early stopping, A2C gradients, scaling, and drift-aware inference. |
 | `rl/trainers.py` | A2C training for one joint multi-head policy and independent per-stock policies; also defines the common `RLPolicySet`. |
 | `rl/ppo.py` | PPO with generalized advantage estimation and clipped objectives for joint and independent policies. |
-| `rl/dqn.py` | DQN with replay buffers, epsilon-greedy exploration, target networks, and joint or independent Q-heads. |
+| `rl/dqn.py` | DQN with replay, exploration, target networks, independent networks, and a shared branching multi-head joint network. |
 
 The six non-GARL RL baselines are:
 
@@ -145,7 +145,7 @@ policy per stock.
 
 | File | Function |
 |---|---|
-| `garl/ddal.py` | Deterministic single-process emulation of Wu and Zeng's A2C/DDAL mechanism. Agents start aligned, train privately, and combine timestamped gradients using experience and return-correlation relevance weights. |
+| `garl/ddal.py` | Event-driven reproduction of Wu and Zeng's A2C/DDAL learning semantics with autonomous clocks, private early learning, FIFO queues, all-to-all asynchronous gradient delivery, and experience/relevance weighting. |
 
 GARL is not extended to PPO or DQN. Those algorithms are retained as non-GARL contextual
 baselines, while `independent_a2c` is the direct “GARL without sharing” ablation.
@@ -154,10 +154,10 @@ baselines, while `independent_a2c` is the direct “GARL without sharing” abla
 
 | File | Function |
 |---|---|
-| `tuning/search.py` | Optuna inner-fold tuning for every supervised forecaster, including causal realized-return updates for rolling ARIMAX. |
-| `tuning/rl_search.py` | Latest-inner-fold tuning for all joint/independent RL algorithms and GARL; selected parameters are reused across evaluation seeds. |
-| `experiment/runner.py` | Downloads data, builds folds, tunes/trains/evaluates every baseline, repeats stochastic methods across seeds, runs buy-and-hold, checkpoints artifacts, and triggers reporting. |
-| `experiment/artifacts.py` | Creates a unique run directory and writes hashes, price snapshot, metrics, positions, daily return/cost paths, equity paths, and failures. |
+| `tuning/search.py` | Optuna inner-fold tuning for every supervised forecaster, including causal rolling-ARIMAX updates and consistent financing assumptions. |
+| `tuning/rl_search.py` | Exhaustive nine-point rollout-length/learning-rate grid on the latest embargoed validation segment; selected settings are reused across evaluation seeds. |
+| `experiment/runner.py` | Downloads price data, builds folds, tunes/trains/evaluates every baseline, repeats stochastic methods across seeds, runs two distinct passive benchmarks, checkpoints artifacts, and triggers reporting. |
+| `experiment/artifacts.py` | Creates a run directory and writes configuration, data snapshots, metrics, positions, daily paths, RL training diagnostics, equity paths, and failures. |
 
 ### Reporting
 
@@ -174,10 +174,10 @@ calculated.
 | File | Function |
 |---|---|
 | `tests/conftest.py` | Small deterministic in-memory OHLCV fixture used only for unit tests; it is not an experiment data provider. |
-| `tests/test_artifacts.py` | Verifies reproducibility hashes and indexed CUDA configuration validation. |
+| `tests/test_artifacts.py` | Verifies configuration/data snapshot output and indexed CUDA configuration validation. |
 | `tests/test_features.py` | Verifies feature causality and removal of warm-up rows. |
 | `tests/test_validation.py` | Verifies capping, embargo, non-overlap, and final-holdout construction. |
-| `tests/test_backtest.py` | Verifies delayed execution, costs, and equal-weight portfolio aggregation. |
+| `tests/test_backtest.py` | Verifies delayed execution, exact RL/backtest sleeve rewards, drift-aware costs, zero-return cash, and the distinction between fixed-share buy-and-hold and daily rebalancing. |
 | `tests/test_garl.py` | Verifies the GARL weighted-gradient calculation. |
 | `tests/test_rl_algorithms.py` | Smoke-tests joint and independent PPO/DQN training and position output. |
 | `tests/test_reporting.py` | Verifies uncertainty aggregation. |
@@ -195,7 +195,7 @@ Running:
 creates:
 
 ```text
-artifacts/<experiment-name>-<UTC-run-id>/
+results/<experiment-name>-<UTC-run-id>/
 ├── manifest.json
 ├── config.toml
 ├── data/
@@ -204,6 +204,7 @@ artifacts/<experiment-name>-<UTC-run-id>/
 ├── positions.csv
 ├── equity.csv
 ├── daily_returns.csv
+├── training_diagnostics.csv
 ├── failures.csv
 └── report/
     ├── summary.csv
@@ -215,24 +216,29 @@ artifacts/<experiment-name>-<UTC-run-id>/
     ├── sharpe_ranking.png
     ├── return_vs_drawdown.png
     ├── cumulative_returns_net.png
+    ├── active_cumulative_returns_net.png
     ├── turnover.png
     ├── fold_stability.png
     ├── data_split_timeline.png
     ├── sharpe_over_time.png
     ├── cost_sensitivity.csv
     ├── cost_sensitivity.png
-    └── crash_period_cumulative_returns.png
+    ├── crash_period_cumulative_returns.png
+    ├── training_reward.png
+    ├── training_loss.png
+    └── training_summary.csv
 ```
 
 | Produced file | Contents |
 |---|---|
-| `manifest.json` | Run ID/time, full resolved configuration, data SHA-256, and configuration SHA-256. |
+| `manifest.json` | Run ID/time and the full resolved configuration. |
 | `config.toml` | Immutable copy of the exact configuration used for the run. |
 | `data/prices.csv` | Tidy normalized OHLCV snapshot used by every baseline and later cost replay. |
 | `metrics.csv` | One portfolio-level metric row per baseline, outer fold/final holdout, repetition, and seed. |
 | `positions.csv` | Long-form target position for every date, ticker, baseline, fold, repetition, and seed. |
 | `equity.csv` | Long-form net portfolio equity curve for every evaluation run. |
-| `daily_returns.csv` | Net return, gross return, explicit cost, and turnover by date for every evaluation run. |
+| `daily_returns.csv` | Net and gross returns, explicit cost, turnover, and cash exposure by date for every evaluation run. |
+| `training_diagnostics.csv` | Per-epoch RL reward/loss diagnostics, stopping decisions, and GARL queue/sharing events. |
 | `failures.csv` | Any failed baseline/fold/seed and its exception; header-only when no failures occur. |
 | `report/summary.csv` | Machine-readable baseline means and confidence intervals. |
 | `report/summary.md` | Dissertation-ready comparison table, scope, and explanation of the figures. |
@@ -241,6 +247,7 @@ artifacts/<experiment-name>-<UTC-run-id>/
 | `report/sharpe_ranking.png` | Headline Sharpe means and confidence intervals. |
 | `report/return_vs_drawdown.png` | CAGR versus absolute maximum drawdown. |
 | `report/cumulative_returns_net.png` | Net-of-cost cumulative return curves with concise date labels. |
+| `report/active_cumulative_returns_net.png` | Net curves for learned/active methods only, avoiding passive-benchmark scale compression. |
 | `report/turnover.png` | Mean fraction of portfolio traded daily. |
 | `report/fold_stability.png` | Baseline-by-fold Sharpe heatmap for market-regime stability. |
 | `report/data_split_timeline.png` | Training and evaluation windows, including final holdout. |
@@ -248,10 +255,14 @@ artifacts/<experiment-name>-<UTC-run-id>/
 | `report/cost_sensitivity.csv` | Replayed metrics for common 0/5/10/20/40-bps cost scenarios. |
 | `report/cost_sensitivity.png` | Sharpe degradation curves under those cost scenarios. |
 | `report/crash_period_cumulative_returns.png` | Optional net curves for the worst available buy-and-hold calendar year. |
+| `report/training_reward.png` | Mean training-reward trajectories by RL method. |
+| `report/training_loss.png` | Optimisation-loss trajectories for within-method convergence diagnosis. |
+| `report/training_summary.csv` | Epochs completed, stopping flags, and reward endpoints for every RL run. |
 
-With the default five walk-forward folds, one final holdout, five RL repetitions, six supervised
-models, six non-GARL RL baselines, GARL, and buy-and-hold, a failure-free full run produces:
+With the default five walk-forward folds, one final holdout, 10 RL repetitions, six supervised
+models, six non-GARL RL baselines, GARL, buy-and-hold, and daily equal-weight rebalancing, a
+failure-free full run produces:
 
-- 42 portfolio evaluations per evaluation period;
+- 78 portfolio evaluations per evaluation period;
 - 6 evaluation periods in total; and
-- 252 rows in `metrics.csv`.
+- 468 rows in `metrics.csv`.

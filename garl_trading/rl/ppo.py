@@ -7,7 +7,14 @@ from torch import nn
 
 from garl_trading.utils import resolve_torch_device
 
-from .core import ActorCritic, JointActorCritic, TradingState, fit_feature_scalers, make_states
+from .core import (
+    ActorCritic,
+    JointActorCritic,
+    RewardEarlyStopper,
+    TradingState,
+    fit_feature_scalers,
+    make_states
+)
 from .trainers import RLPolicySet
 
 
@@ -17,7 +24,7 @@ def gae(
     dones: list[bool],
     next_value: float,
     gamma: float,
-    gae_lambda: float,
+    gae_lambda: float
 ) -> tuple[np.ndarray, np.ndarray]:
     advantages = np.zeros(len(rewards), dtype=np.float32)
     running = 0.0
@@ -39,8 +46,8 @@ def asset_ppo_epoch(
     rng: np.random.Generator,
     clip_epsilon: float,
     gae_lambda: float,
-    update_epochs: int = 4,
-) -> None:
+    update_epochs: int = 4
+) -> dict[str, float]:
     device = next(model.parameters()).device
     observations, actions, rewards, values, old_log_probabilities, dones = [], [], [], [], [], []
     observation = state.observation()
@@ -70,6 +77,7 @@ def asset_ppo_epoch(
     )
     return_tensor = torch.tensor(returns, device=device)
 
+    losses, entropies = [], []
     for _ in range(update_epochs):
         logits, predicted_values = model(obs_tensor)
         all_log_probabilities = torch.log_softmax(logits, dim=-1)
@@ -88,6 +96,13 @@ def asset_ppo_epoch(
         loss.backward()
         nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
+        losses.append(float(loss.item()))
+        entropies.append(float(entropy.item()))
+    return {
+        "training_reward": float(np.mean(rewards)),
+        "loss": float(np.mean(losses)),
+        "entropy": float(np.mean(entropies))
+    }
 
 
 def train_independent_ppo(
@@ -104,12 +119,17 @@ def train_independent_ppo(
     device: str = "auto",
     clip_epsilon: float = 0.2,
     gae_lambda: float = 0.95,
+    short_borrow_bps_annual: float = 0.0,
+    early_stopping_patience: int = 15,
+    early_stopping_min_delta: float = 1e-4,
+    minimum_train_epochs: int = 30
 ) -> RLPolicySet:
     device = resolve_torch_device(device)
     tickers = tuple(features)
     scalers = fit_feature_scalers(features)
     states = make_states(
-        features, closes, scalers, levels=levels, lookback=lookback, cost_rate=cost_rate
+        features, closes, scalers, levels=levels, lookback=lookback, cost_rate=cost_rate,
+        short_borrow_bps_annual=short_borrow_bps_annual
     )
     models, optimizers, randoms = {}, {}, {}
     observation_size = features[tickers[0]].shape[1] * lookback + 1
@@ -118,19 +138,49 @@ def train_independent_ppo(
         models[ticker] = ActorCritic(observation_size, len(levels)).to(device)
         optimizers[ticker] = torch.optim.Adam(models[ticker].parameters(), lr=learning_rate)
         randoms[ticker] = np.random.default_rng(seed + i)
-    for _ in range(epochs):
+    diagnostics = []
+    stopper = RewardEarlyStopper(
+        early_stopping_patience, early_stopping_min_delta, minimum_train_epochs
+    )
+    for epoch in range(epochs):
+        epoch_rows = []
         for ticker in tickers:
-            asset_ppo_epoch(
-                models[ticker],
-                states[ticker],
-                optimizers[ticker],
-                rollout_length=rollout_length,
-                gamma=gamma,
-                rng=randoms[ticker],
-                clip_epsilon=clip_epsilon,
-                gae_lambda=gae_lambda,
+            epoch_rows.append(
+                asset_ppo_epoch(
+                    models[ticker],
+                    states[ticker],
+                    optimizers[ticker],
+                    rollout_length=rollout_length,
+                    gamma=gamma,
+                    rng=randoms[ticker],
+                    clip_epsilon=clip_epsilon,
+                    gae_lambda=gae_lambda
+                )
             )
-    return RLPolicySet("independent", models, scalers, tickers, levels, lookback)
+        row = {
+            "epoch": epoch,
+            **{
+                key: float(np.mean([item[key] for item in epoch_rows]))
+                for key in ("training_reward", "loss", "entropy")
+            }
+        }
+        diagnostics.append(row)
+        smoothed = float(np.mean([item["training_reward"] for item in diagnostics[-5:]]))
+        if stopper.update(epoch, smoothed, models):
+            diagnostics[-1]["early_stopped"] = True
+            break
+    stopper.restore(models)
+    return RLPolicySet(
+        "independent",
+        models,
+        scalers,
+        tickers,
+        levels,
+        lookback,
+        cost_rate,
+        short_borrow_bps_annual / 10000 / 252,
+        diagnostics
+    )
 
 
 def train_joint_ppo(
@@ -147,12 +197,17 @@ def train_joint_ppo(
     device: str = "auto",
     clip_epsilon: float = 0.2,
     gae_lambda: float = 0.95,
+    short_borrow_bps_annual: float = 0.0,
+    early_stopping_patience: int = 15,
+    early_stopping_min_delta: float = 1e-4,
+    minimum_train_epochs: int = 30
 ) -> RLPolicySet:
     device = resolve_torch_device(device)
     tickers = tuple(features)
     scalers = fit_feature_scalers(features)
     states = make_states(
-        features, closes, scalers, levels=levels, lookback=lookback, cost_rate=cost_rate
+        features, closes, scalers, levels=levels, lookback=lookback, cost_rate=cost_rate,
+        short_borrow_bps_annual=short_borrow_bps_annual
     )
     per_asset_size = features[tickers[0]].shape[1] * lookback + 1
     torch.manual_seed(seed)
@@ -161,7 +216,11 @@ def train_joint_ppo(
     rng = np.random.default_rng(seed)
     current = {ticker: states[ticker].observation() for ticker in tickers}
 
-    for _ in range(epochs):
+    diagnostics = []
+    stopper = RewardEarlyStopper(
+        early_stopping_patience, early_stopping_min_delta, minimum_train_epochs
+    )
+    for epoch in range(epochs):
         observations, actions, rewards, values, old_logs, dones = [], [], [], [], [], []
         for _ in range(rollout_length):
             joint_observation = np.concatenate([current[ticker] for ticker in tickers])
@@ -204,6 +263,7 @@ def train_joint_ppo(
             advantage_tensor.std() + 1e-8
         )
         return_tensor = torch.tensor(returns, device=device)
+        update_losses, update_entropies = [], []
         for _ in range(4):
             logits, predicted_values = model(obs_tensor)
             log_probabilities = torch.log_softmax(logits, dim=-1)
@@ -211,7 +271,7 @@ def train_joint_ppo(
             ratio = torch.exp(new_log - old_log_tensor)
             objective = torch.minimum(
                 ratio * advantage_tensor,
-                torch.clamp(ratio, 1 - clip_epsilon, 1 + clip_epsilon) * advantage_tensor,
+                torch.clamp(ratio, 1 - clip_epsilon, 1 + clip_epsilon) * advantage_tensor
             )
             probabilities = torch.softmax(logits, dim=-1)
             entropy = -(probabilities * log_probabilities).sum(axis=-1).mean()
@@ -224,4 +284,29 @@ def train_joint_ppo(
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
-    return RLPolicySet("joint", model, scalers, tickers, levels, lookback)
+            update_losses.append(float(loss.item()))
+            update_entropies.append(float(entropy.item()))
+        diagnostics.append(
+            {
+                "epoch": epoch,
+                "training_reward": float(np.mean(rewards)),
+                "loss": float(np.mean(update_losses)),
+                "entropy": float(np.mean(update_entropies))
+            }
+        )
+        smoothed = float(np.mean([row["training_reward"] for row in diagnostics[-5:]]))
+        if stopper.update(epoch, smoothed, model):
+            diagnostics[-1]["early_stopped"] = True
+            break
+    stopper.restore(model)
+    return RLPolicySet(
+        "joint",
+        model,
+        scalers,
+        tickers,
+        levels,
+        lookback,
+        cost_rate,
+        short_borrow_bps_annual / 10000 / 252,
+        diagnostics
+    )

@@ -12,7 +12,7 @@ def parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
     run = subparsers.add_parser("run", help="run an experiment")
     run.add_argument("--config", default="configs/default.toml")
-    report = subparsers.add_parser("report", help="rebuild a report from artifacts")
+    report = subparsers.add_parser("report", help="rebuild a report from results")
     report.add_argument("--run-dir", required=True)
     report.add_argument("--confidence", type=float, default=0.95)
     return parser

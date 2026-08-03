@@ -88,6 +88,7 @@ def test_report_emits_each_dissertation_figure_as_a_separate_file(tmp_path):
                     "calmar": 1.0,
                     "turnover_daily": 0.1,
                     "gross_exposure": 1.0,
+                    "cash_exposure": 0.0,
                     "cost_drag": 0.01,
                 }
             )
@@ -104,6 +105,7 @@ def test_report_emits_each_dissertation_figure_as_a_separate_file(tmp_path):
                         "gross_return": net_return + 0.0001,
                         "cost": 0.0001,
                         "turnover": 0.1,
+                        "cash_exposure": 0.0,
                     }
                 )
     pd.DataFrame(metric_rows).to_csv(run_dir / "metrics.csv", index=False)
@@ -117,6 +119,7 @@ def test_report_emits_each_dissertation_figure_as_a_separate_file(tmp_path):
         "sharpe_ranking.png",
         "return_vs_drawdown.png",
         "cumulative_returns_net.png",
+        "active_cumulative_returns_net.png",
         "turnover.png",
         "fold_stability.png",
         "data_split_timeline.png",

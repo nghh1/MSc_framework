@@ -10,8 +10,8 @@ from typing import Any
 class ExperimentConfig:
     name: str = "garl_main"
     seed: int = 42
-    repetitions: int = 5
-    artifacts_dir: str = "artifacts"
+    repetitions: int = 10
+    artifacts_dir: str = "results"
 
 
 @dataclass(frozen=True)
@@ -29,7 +29,7 @@ class ValidationConfig:
     min_train_bars: int = 1260
     max_train_bars: int = 1864
     embargo_bars: int = 1
-    final_holdout_start: str | None = "2021-01-01"
+    final_holdout_start: str | None = "2023-01-01"
     use_final_holdout: bool = True
 
 
@@ -38,7 +38,7 @@ class ExecutionConfig:
     initial_capital: float = 100000.0
     transaction_cost_bps: float = 5.0
     slippage_bps: float = 2.0
-    short_borrow_bps_annual: float = 0.0
+    short_borrow_bps_annual: float = 50.0
     position_levels: tuple[float, ...] = (-1.0, -0.5, 0.0, 0.5, 1.0)
 
 
@@ -67,13 +67,19 @@ class ModelsConfig:
     rollout_length: int = 32
     learning_rate: float = 3e-4
     gamma: float = 0.95
+    early_stopping_patience: int = 15
+    early_stopping_min_delta: float = 1e-4
+    minimum_train_epochs: int = 30
+    garl_share_after_fraction: float = 0.3
+    garl_share_every: int = 4
+    garl_pool_size: int = 0
 
 
 @dataclass(frozen=True)
 class TuningConfig:
     enabled: bool = True
     trials: int = 15
-    rl_trials: int = 5
+    rl_trials: int = 9
     objective: str = "sharpe"
 
 
@@ -108,6 +114,14 @@ class FrameworkConfig:
             raise ValueError("rollout_length must be >= 2 and gamma must lie in (0, 1].")
         if self.models.learning_rate <= 0:
             raise ValueError("learning_rate must be positive.")
+        if self.models.early_stopping_patience < 1 or self.models.minimum_train_epochs < 1:
+            raise ValueError("Early-stopping patience and minimum epochs must be positive.")
+        if self.models.early_stopping_min_delta < 0:
+            raise ValueError("early_stopping_min_delta cannot be negative.")
+        if not 0 <= self.models.garl_share_after_fraction < 1:
+            raise ValueError("garl_share_after_fraction must lie in [0, 1).")
+        if self.models.garl_share_every < 1 or self.models.garl_pool_size < 0:
+            raise ValueError("GARL sharing interval must be positive and pool size non-negative.")
         if any(
             value < 0
             for value in (

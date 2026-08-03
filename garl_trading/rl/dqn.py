@@ -11,7 +11,7 @@ from torch import nn
 
 from garl_trading.utils import resolve_torch_device
 
-from .core import fit_feature_scalers, make_states
+from .core import RewardEarlyStopper, fit_feature_scalers, make_states
 from .trainers import RLPolicySet
 
 
@@ -23,21 +23,22 @@ class QNetwork(nn.Module):
             nn.Tanh(),
             nn.Linear(hidden, hidden),
             nn.Tanh(),
-            nn.Linear(hidden, actions),
+            nn.Linear(hidden, actions)
         )
 
     def forward(self, observation):
         return self.network(observation)
 
 
-class JointQNetwork(nn.Module):
+class BranchingQNetwork(nn.Module):
+    """Shared representation with one discrete Q-value branch per stock."""
     def __init__(self, per_asset_size: int, assets: int, actions: int, hidden: int = 128):
         super().__init__()
         self.body = nn.Sequential(
             nn.Linear(per_asset_size * assets, hidden),
             nn.Tanh(),
             nn.Linear(hidden, hidden),
-            nn.Tanh(),
+            nn.Tanh()
         )
         self.heads = nn.ModuleList([nn.Linear(hidden, actions) for _ in range(assets)])
 
@@ -81,8 +82,8 @@ def independent_update(
     target: QNetwork,
     optimizer: torch.optim.Optimizer,
     batch: list[Transition],
-    gamma: float,
-) -> None:
+    gamma: float
+) -> float:
     device = next(model.parameters()).device
     observations = torch.tensor(
         np.stack([item.observation for item in batch]), dtype=torch.float32, device=device
@@ -101,6 +102,7 @@ def independent_update(
     loss.backward()
     nn.utils.clip_grad_norm_(model.parameters(), 1.0)
     optimizer.step()
+    return float(loss.item())
 
 
 def train_independent_dqn(
@@ -116,12 +118,17 @@ def train_independent_dqn(
     seed: int,
     device: str = "auto",
     epsilon_decay_fraction: float = 0.5,
+    short_borrow_bps_annual: float = 0.0,
+    early_stopping_patience: int = 15,
+    early_stopping_min_delta: float = 1e-4,
+    minimum_train_epochs: int = 30
 ) -> RLPolicySet:
     device = resolve_torch_device(device)
     tickers = tuple(features)
     scalers = fit_feature_scalers(features)
     states = make_states(
-        features, closes, scalers, levels=levels, lookback=lookback, cost_rate=cost_rate
+        features, closes, scalers, levels=levels, lookback=lookback, cost_rate=cost_rate,
+        short_borrow_bps_annual=short_borrow_bps_annual
     )
     observation_size = features[tickers[0]].shape[1] * lookback + 1
     models, targets, optimizers, buffers, randoms = {}, {}, {}, {}, {}
@@ -135,8 +142,13 @@ def train_independent_dqn(
         randoms[ticker] = np.random.default_rng(seed + i)
     current = {ticker: states[ticker].observation() for ticker in tickers}
 
+    diagnostics = []
+    stopper = RewardEarlyStopper(
+        early_stopping_patience, early_stopping_min_delta, minimum_train_epochs
+    )
     for epoch in range(epochs):
         epsilon_value = epsilon(epoch, epochs, 1.0, 0.05, epsilon_decay_fraction)
+        epoch_rewards, epoch_losses = [], []
         for _ in range(rollout_length):
             for ticker in tickers:
                 if randoms[ticker].random() < epsilon_value:
@@ -148,22 +160,48 @@ def train_independent_dqn(
                         )
                     action = int(torch.argmax(q_values, dim=-1).item())
                 next_observation, reward, done = states[ticker].step(action)
+                epoch_rewards.append(reward)
                 buffers[ticker].append(
                     Transition(current[ticker], action, reward, next_observation, done)
                 )
                 current[ticker] = states[ticker].reset() if done else next_observation
                 if len(buffers[ticker]) >= 64:
-                    independent_update(
-                        models[ticker],
-                        targets[ticker],
-                        optimizers[ticker],
-                        buffers[ticker].sample(64),
-                        gamma,
+                    epoch_losses.append(
+                        independent_update(
+                            models[ticker],
+                            targets[ticker],
+                            optimizers[ticker],
+                            buffers[ticker].sample(64),
+                            gamma
+                        )
                     )
         if (epoch + 1) % 10 == 0:
             for ticker in tickers:
                 targets[ticker].load_state_dict(models[ticker].state_dict())
-    return RLPolicySet("independent", models, scalers, tickers, levels, lookback)
+        diagnostics.append(
+            {
+                "epoch": epoch,
+                "training_reward": float(np.mean(epoch_rewards)),
+                "loss": float(np.mean(epoch_losses)) if epoch_losses else np.nan,
+                "epsilon": epsilon_value
+            }
+        )
+        smoothed = float(np.mean([row["training_reward"] for row in diagnostics[-5:]]))
+        if stopper.update(epoch, smoothed, models):
+            diagnostics[-1]["early_stopped"] = True
+            break
+    stopper.restore(models)
+    return RLPolicySet(
+        "independent",
+        models,
+        scalers,
+        tickers,
+        levels,
+        lookback,
+        cost_rate,
+        short_borrow_bps_annual / 10000 / 252,
+        diagnostics
+    )
 
 
 def train_joint_dqn(
@@ -179,25 +217,35 @@ def train_joint_dqn(
     seed: int,
     device: str = "auto",
     epsilon_decay_fraction: float = 0.5,
+    short_borrow_bps_annual: float = 0.0,
+    early_stopping_patience: int = 15,
+    early_stopping_min_delta: float = 1e-4,
+    minimum_train_epochs: int = 30
 ) -> RLPolicySet:
     device = resolve_torch_device(device)
     tickers = tuple(features)
     scalers = fit_feature_scalers(features)
     states = make_states(
-        features, closes, scalers, levels=levels, lookback=lookback, cost_rate=cost_rate
+        features, closes, scalers, levels=levels, lookback=lookback, cost_rate=cost_rate,
+        short_borrow_bps_annual=short_borrow_bps_annual,
     )
     per_asset_size = features[tickers[0]].shape[1] * lookback + 1
     torch.manual_seed(seed)
-    model = JointQNetwork(per_asset_size, len(tickers), len(levels)).to(device)
-    target = JointQNetwork(per_asset_size, len(tickers), len(levels)).to(device)
+    model = BranchingQNetwork(per_asset_size, len(tickers), len(levels)).to(device)
+    target = BranchingQNetwork(per_asset_size, len(tickers), len(levels)).to(device)
     target.load_state_dict(model.state_dict())
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     buffer = ReplayBuffer(5000, seed)
     rng = np.random.default_rng(seed)
     current = {ticker: states[ticker].observation() for ticker in tickers}
 
+    diagnostics = []
+    stopper = RewardEarlyStopper(
+        early_stopping_patience, early_stopping_min_delta, minimum_train_epochs
+    )
     for epoch in range(epochs):
         epsilon_value = epsilon(epoch, epochs, 1.0, 0.05, epsilon_decay_fraction)
+        epoch_rewards, epoch_losses = [], []
         for _ in range(rollout_length):
             joint_observation = np.concatenate([current[ticker] for ticker in tickers])
             if rng.random() < epsilon_value:
@@ -211,6 +259,7 @@ def train_joint_dqn(
                 next_observation, reward, done = states[ticker].step(action)
                 current[ticker] = states[ticker].reset() if done else next_observation
                 rewards.append(reward)
+                epoch_rewards.append(reward)
                 dones.append(done)
             next_joint = np.concatenate([current[ticker] for ticker in tickers])
             buffer.append(
@@ -223,7 +272,7 @@ def train_joint_dqn(
                 observations = torch.tensor(
                     np.stack([item.observation for item in batch]),
                     dtype=torch.float32,
-                    device=device,
+                    device=device
                 )
                 action_tensor = torch.tensor(
                     [item.action for item in batch], dtype=torch.long, device=device
@@ -232,7 +281,7 @@ def train_joint_dqn(
                 next_observations = torch.tensor(
                     np.stack([item.next_observation for item in batch]),
                     dtype=torch.float32,
-                    device=device,
+                    device=device
                 )
                 done_tensor = torch.tensor(
                     [item.done for item in batch], dtype=torch.float32, device=device
@@ -246,6 +295,30 @@ def train_joint_dqn(
                 loss.backward()
                 nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 optimizer.step()
+                epoch_losses.append(float(loss.item()))
         if (epoch + 1) % 10 == 0:
             target.load_state_dict(model.state_dict())
-    return RLPolicySet("joint", model, scalers, tickers, levels, lookback)
+        diagnostics.append(
+            {
+                "epoch": epoch,
+                "training_reward": float(np.mean(epoch_rewards)),
+                "loss": float(np.mean(epoch_losses)) if epoch_losses else np.nan,
+                "epsilon": epsilon_value
+            }
+        )
+        smoothed = float(np.mean([row["training_reward"] for row in diagnostics[-5:]]))
+        if stopper.update(epoch, smoothed, model):
+            diagnostics[-1]["early_stopped"] = True
+            break
+    stopper.restore(model)
+    return RLPolicySet(
+        "joint",
+        model,
+        scalers,
+        tickers,
+        levels,
+        lookback,
+        cost_rate,
+        short_borrow_bps_annual / 10000 / 252,
+        diagnostics
+    )
