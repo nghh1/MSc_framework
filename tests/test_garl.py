@@ -1,7 +1,15 @@
 import pandas as pd
 import torch
+from conftest import market_fixture
 
-from garl_trading.garl.ddal import GradientPiece, return_relevance, weighted_average
+from garl_trading.data import build_dataset
+from garl_trading.data.features import FEATURE_COLUMNS
+from garl_trading.garl.ddal import (
+    GradientPiece,
+    return_relevance,
+    train_garl_ddal,
+    weighted_average,
+)
 from garl_trading.rl.core import initialise_asset_actor_critics
 
 
@@ -33,3 +41,37 @@ def test_garl_and_independent_ablation_share_reproducible_initialisation_contrac
     second_a = next(second["A"].parameters())
     assert not torch.allclose(first_a, first_b)
     assert torch.allclose(first_a, second_a)
+
+
+def test_garl_checkpoints_become_eligible_only_after_shared_updates():
+    dataset = build_dataset(market_fixture(("AAA", "BBB"), periods=280, seed=6))
+    features = {
+        ticker: dataset.features[ticker].iloc[:50].loc[:, FEATURE_COLUMNS]
+        for ticker in dataset.tickers
+    }
+    closes = {
+        ticker: dataset.prices[ticker]["close"].iloc[:50] for ticker in dataset.tickers
+    }
+    policy = train_garl_ddal(
+        features,
+        closes,
+        levels=(-1.0, 0.0, 1.0),
+        lookback=5,
+        epochs=4,
+        rollout_length=4,
+        learning_rate=3e-4,
+        gamma=0.95,
+        cost_rate=0.0007,
+        seed=4,
+        share_after_fraction=0.25,
+        share_every=2,
+        minimum_train_epochs=1,
+    )
+
+    for agent in dataset.tickers:
+        rows = [row for row in policy.diagnostics if row["agent"] == agent]
+        assert any(row["checkpoint_eligible"] for row in rows)
+        seen_shared_update = False
+        for row in rows:
+            seen_shared_update |= row["shared_update"]
+            assert row["checkpoint_eligible"] == seen_shared_update

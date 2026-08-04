@@ -101,6 +101,7 @@ def train_garl_ddal(
     threshold = int(epochs * share_after_fraction)
     relevance = return_relevance(closes)
     queues: dict[str, list[GradientPiece]] = {ticker: [] for ticker in tickers}
+    has_shared_update = {ticker: False for ticker in tickers}
     local_epochs = {ticker: 0 for ticker in tickers}
     scheduler = np.random.default_rng(seed + 100000)
     pace = {ticker: float(scheduler.uniform(0.75, 1.25)) for ticker in tickers}
@@ -154,6 +155,7 @@ def train_garl_ddal(
                 del queues[ticker][:take]
                 apply_gradient(models[ticker], optimizers[ticker], weighted_average(chosen))
                 shared_update = True
+                has_shared_update[ticker] = True
         diagnostics.append(
             {
                 "epoch": epoch,
@@ -162,12 +164,18 @@ def train_garl_ddal(
                 "training_reward": reward,
                 "loss": loss,
                 "queue_size": len(queues[ticker]),
-                "shared_update": shared_update
+                "shared_update": shared_update,
+                "checkpoint_eligible": has_shared_update[ticker],
             }
         )
         reward_history[ticker].append(reward)
         smoothed = float(np.mean(reward_history[ticker][-5:]))
-        if stoppers[ticker].update(epoch, smoothed, models[ticker]):
+        if stoppers[ticker].update(
+            epoch,
+            smoothed,
+            models[ticker],
+            checkpoint_eligible=has_shared_update[ticker],
+        ):
             diagnostics[-1].update(
                 {
                     "early_stopped": True,

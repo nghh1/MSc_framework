@@ -92,12 +92,18 @@ def train_independent_a2c(
         optimizers[ticker] = torch.optim.Adam(models[ticker].parameters(), lr=learning_rate)
         randoms[ticker] = np.random.default_rng(seed + i)
     diagnostics = []
-    stopper = RewardEarlyStopper(
-        early_stopping_patience, early_stopping_min_delta, minimum_train_epochs
-    )
+    stoppers = {
+        ticker: RewardEarlyStopper(
+            early_stopping_patience, early_stopping_min_delta, minimum_train_epochs
+        )
+        for ticker in tickers
+    }
+    reward_history: dict[str, list[float]] = {ticker: [] for ticker in tickers}
+    active = set(tickers)
     for epoch in range(epochs):
-        losses, rewards = [], []
         for ticker in tickers:
+            if ticker not in active:
+                continue
             gradients, loss, reward = a2c_gradient(
                 models[ticker],
                 states[ticker],
@@ -106,26 +112,30 @@ def train_independent_a2c(
                 rng=randoms[ticker]
             )
             apply_gradient(models[ticker], optimizers[ticker], gradients)
-            losses.append(loss)
-            rewards.append(reward)
-        diagnostics.append(
-            {
+            reward_history[ticker].append(reward)
+            row = {
                 "epoch": epoch,
-                "training_reward": float(np.mean(rewards)),
-                "loss": float(np.mean(losses))
+                "agent": ticker,
+                "training_reward": reward,
+                "loss": loss,
+                "checkpoint_eligible": epoch + 1 > minimum_train_epochs,
             }
-        )
-        smoothed = float(np.mean([row["training_reward"] for row in diagnostics[-5:]]))
-        if stopper.update(epoch, smoothed, models):
-            diagnostics[-1].update(
-                {
-                    "early_stopped": True,
-                    "best_epoch": stopper.best_epoch,
-                    "stop_epoch": stopper.stop_epoch,
-                }
-            )
+            smoothed = float(np.mean(reward_history[ticker][-5:]))
+            if stoppers[ticker].update(epoch, smoothed, models[ticker]):
+                row.update(
+                    {
+                        "early_stopped": True,
+                        "best_epoch": stoppers[ticker].best_epoch,
+                        "stop_epoch": stoppers[ticker].stop_epoch,
+                    }
+                )
+                stoppers[ticker].restore(models[ticker])
+                active.remove(ticker)
+            diagnostics.append(row)
+        if not active:
             break
-    stopper.restore(models)
+    for ticker in tickers:
+        stoppers[ticker].restore(models[ticker])
     return RLPolicySet(
         "independent",
         models,

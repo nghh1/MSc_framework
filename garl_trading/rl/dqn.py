@@ -143,8 +143,10 @@ def train_independent_dqn(
     current = {ticker: states[ticker].observation() for ticker in tickers}
 
     diagnostics = []
+    exploration_decay_epochs = max(1, int(epochs * epsilon_decay_fraction))
+    checkpoint_minimum_epochs = max(minimum_train_epochs, exploration_decay_epochs)
     stopper = RewardEarlyStopper(
-        early_stopping_patience, early_stopping_min_delta, minimum_train_epochs
+        early_stopping_patience, early_stopping_min_delta, checkpoint_minimum_epochs
     )
     for epoch in range(epochs):
         epsilon_value = epsilon(epoch, epochs, 1.0, 0.05, epsilon_decay_fraction)
@@ -183,7 +185,8 @@ def train_independent_dqn(
                 "epoch": epoch,
                 "training_reward": float(np.mean(epoch_rewards)),
                 "loss": float(np.mean(epoch_losses)) if epoch_losses else np.nan,
-                "epsilon": epsilon_value
+                "epsilon": epsilon_value,
+                "checkpoint_eligible": epoch + 1 > checkpoint_minimum_epochs,
             }
         )
         smoothed = float(np.mean([row["training_reward"] for row in diagnostics[-5:]]))
@@ -246,8 +249,10 @@ def train_joint_dqn(
     current = {ticker: states[ticker].observation() for ticker in tickers}
 
     diagnostics = []
+    exploration_decay_epochs = max(1, int(epochs * epsilon_decay_fraction))
+    checkpoint_minimum_epochs = max(minimum_train_epochs, exploration_decay_epochs)
     stopper = RewardEarlyStopper(
-        early_stopping_patience, early_stopping_min_delta, minimum_train_epochs
+        early_stopping_patience, early_stopping_min_delta, checkpoint_minimum_epochs
     )
     for epoch in range(epochs):
         epsilon_value = epsilon(epoch, epochs, 1.0, 0.05, epsilon_decay_fraction)
@@ -309,7 +314,8 @@ def train_joint_dqn(
                 "epoch": epoch,
                 "training_reward": float(np.mean(epoch_rewards)),
                 "loss": float(np.mean(epoch_losses)) if epoch_losses else np.nan,
-                "epsilon": epsilon_value
+                "epsilon": epsilon_value,
+                "checkpoint_eligible": epoch + 1 > checkpoint_minimum_epochs,
             }
         )
         smoothed = float(np.mean([row["training_reward"] for row in diagnostics[-5:]]))

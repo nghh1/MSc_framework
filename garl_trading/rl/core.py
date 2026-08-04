@@ -21,7 +21,19 @@ class RewardEarlyStopper:
         self.best_epoch: int | None = None
         self.stop_epoch: int | None = None
 
-    def update(self, epoch: int, reward: float, models) -> bool:
+    def update(
+        self,
+        epoch: int,
+        reward: float,
+        models,
+        *,
+        checkpoint_eligible: bool = True,
+    ) -> bool:
+        completed_epochs = epoch + 1
+        if completed_epochs <= self.minimum_epochs or not checkpoint_eligible:
+            self.bad_epochs = 0
+            return False
+
         improved = reward > self.best + self.min_delta
         if improved:
             self.best = reward
@@ -34,10 +46,6 @@ class RewardEarlyStopper:
                 }
             else:
                 self.best_state = deepcopy(models.state_dict())
-        completed_epochs = epoch + 1
-        if completed_epochs <= self.minimum_epochs:
-            self.bad_epochs = 0
-            return False
         if improved:
             self.bad_epochs = 0
         else:

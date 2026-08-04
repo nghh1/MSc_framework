@@ -48,8 +48,9 @@ in the dissertation avoids overstating equivalence to a full quantile, multi-hor
 
 - Static ARIMAX is the interpretable linear time-series baseline. It tests whether autoregressive
   errors plus exogenous technical features are sufficient without online parameter adaptation.
-- Rolling ARIMAX refits on a capped recent window and causally incorporates only returns known by
-  the decision date. It tests adaptation to parameter drift.
+- Rolling ARIMAX causally assimilates every newly observed return into its state-space filter and
+  periodically re-estimates parameters on a capped recent window. It therefore retains daily
+  autoregressive state updates without paying the cost of a full parameter refit every day.
 - Random Forest captures nonlinear feature interactions without sequence-state assumptions and is
   robust on modest tabular samples. Depth and leaf-size constraints control overfitting.
 - Equal-weight buy-and-hold is the passive investable reference under the same dates, capital, and
@@ -104,11 +105,19 @@ RL tuning exhaustively evaluates the nine combinations of rollout length `{16, 3
 learning-rate multiplier `{1/3, 1, 3}` on the latest embargoed pre-test validation segment. The same
 budget applies to every RL method and selected settings are reused for all ten evaluation seeds.
 
-Training monitors a five-epoch moving mean reward. After at least 30 epochs, training stops when the
-moving reward has not improved by `0.0001` for 15 epochs, and restores the best model state. GARL
-applies this rule independently to each autonomous agent. Reward, loss, entropy or epsilon where
-applicable, asynchronous queue size, and sharing events are saved for diagnosis. Loss magnitudes are
-algorithm-specific and must not be ranked across A2C, PPO, and DQN.
+Training monitors a five-epoch moving mean reward. Burn-in states are not eligible checkpoints. A2C
+and PPO checkpoint only after at least 30 completed epochs; DQN waits until both the burn-in and its
+epsilon-decay phase have completed. GARL additionally requires each stock agent to have applied at
+least one shared-gradient update, so a reported GARL policy cannot silently restore a private,
+pre-DDAL state. After eligibility begins, training stops when the moving reward has not improved by
+`0.0001` for 15 epochs and restores the best eligible state.
+
+GARL and its direct independent-A2C ablation both apply stopping independently per stock agent. This
+keeps their checkpoint contract aligned so that DDAL sharing and asynchronous scheduling, rather
+than an aggregate-versus-local stopping rule, define the methodological difference. Reward, loss,
+entropy or epsilon where applicable, checkpoint eligibility, asynchronous queue size, and sharing
+events are saved for diagnosis. Loss magnitudes are algorithm-specific and must not be ranked across
+A2C, PPO, and DQN.
 
 ## Indicators: ADX and ROC
 

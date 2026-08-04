@@ -105,6 +105,14 @@ class RollingARIMAX(ForecastModel):
                 x_history = pd.concat([x_history, x_test.loc[[previous]]])
                 value = observed.loc[previous] if observed is not None else predictions[previous]
                 y_history = pd.concat([y_history, pd.Series([value], index=[previous])])
+                if fitted is not None:
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")
+                        fitted = fitted.append(
+                            np.asarray([float(value)]),
+                            exog=x_test.loc[[previous]].to_numpy(),
+                            refit=False,
+                        )
             if fitted is None or i % self.refit_every == 0:
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore")
