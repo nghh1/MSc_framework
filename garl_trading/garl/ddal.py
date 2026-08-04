@@ -66,6 +66,10 @@ def train_garl_ddal(
     cost_rate: float,
     seed: int,
     device: str = "auto",
+    encoder_channels: int = 32,
+    encoder_kernel_size: int = 3,
+    encoder_dilations: tuple[int, ...] = (1, 2, 4, 8),
+    encoder_dropout: float = 0.0,
     share_after_fraction: float = 0.3,
     share_every: int = 4,
     pool_size: int | None = None,
@@ -91,7 +95,16 @@ def train_garl_ddal(
     )
     observation_size = features[tickers[0]].shape[1] * lookback + 1
     models = initialise_asset_actor_critics(
-        tickers, observation_size, len(levels), seed, device
+        tickers,
+        observation_size,
+        len(levels),
+        seed,
+        device,
+        lookback=lookback,
+        encoder_channels=encoder_channels,
+        encoder_kernel_size=encoder_kernel_size,
+        encoder_dilations=encoder_dilations,
+        encoder_dropout=encoder_dropout,
     )
     optimizers = {
         ticker: torch.optim.Adam(models[ticker].parameters(), lr=learning_rate)

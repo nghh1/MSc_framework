@@ -1,4 +1,5 @@
 import pandas as pd
+import pytest
 from conftest import market_fixture
 
 from garl_trading.config import FrameworkConfig, ModelsConfig
@@ -33,3 +34,15 @@ def test_artifact_store_saves_config_and_market_snapshot(tmp_path):
 def test_cuda_index_is_a_valid_configured_device():
     config = FrameworkConfig(models=ModelsConfig(device="cuda:1"))
     config.validate()
+
+
+def test_rl_tcn_receptive_field_must_cover_the_lookback():
+    config = FrameworkConfig(
+        models=ModelsConfig(
+            lookback=20,
+            rl_encoder_kernel_size=2,
+            rl_encoder_dilations=(1, 2, 4),
+        )
+    )
+    with pytest.raises(ValueError, match="receptive field"):
+        config.validate()

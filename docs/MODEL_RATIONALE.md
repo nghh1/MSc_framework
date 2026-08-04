@@ -58,15 +58,24 @@ in the dissertation avoids overstating equivalence to a full quantile, multi-hor
 
 ## Non-GARL RL baselines
 
-The state for each stock is the standardised 20-day feature window plus its current position. The
-position is included because transaction costs make the problem state-dependent. Discrete symmetric
-actions allow long, flat, and short exposure without giving one RL algorithm a different action
-space.
+The state for each stock is the standardised 20-day by 19-feature market window plus its current
+position. The market window remains two-dimensional inside the policy and is encoded by four
+residual causal TCN blocks with 32 channels, kernel size 3, and dilations 1, 2, 4, and 8. Their
+31-observation receptive field covers the complete 20-day lookback. The current drifted position is
+concatenated after temporal encoding because it is portfolio state rather than a market sequence.
+It is included because transaction costs make the problem state-dependent.
 
-The joint (`single_*`) policy concatenates all stock states, shares a two-layer representation, and
-uses one action head per stock. It can learn cross-stock relationships but its parameterisation grows
-with the universe. Independent policies train one network per stock. They cannot transfer knowledge,
-but avoid negative transfer and provide the cleanest control for GARL.
+Encoder dropout is fixed at zero. Random feature masking would make PPO's stored and recomputed
+action likelihoods depend on different dropout masks and would therefore distort the clipped
+likelihood ratio. Capacity is instead controlled through the 32-channel bottleneck and causal weight
+sharing. Discrete symmetric actions allow long, half-long, flat, half-short, and short exposure
+without giving one RL algorithm a different action space.
+
+The joint (`single_*`) policy applies one weight-shared TCN encoder to every stock, concatenates the
+nine compact stock representations, shares a two-layer portfolio representation, and uses one action
+head per stock. This reduces the original immediate input compression from 3,429 flattened values to
+297 encoded values. Independent policies train one complete TCN-policy network per stock. They cannot
+transfer knowledge, but avoid negative transfer and provide the cleanest control for GARL.
 
 - A2C is the direct on-policy actor-critic reference and the base learner used by GARL.
 - PPO adds clipped policy updates and generalised advantage estimation, testing whether improved
@@ -79,12 +88,14 @@ PPO and DQN are non-GARL baselines; they are not presented as extensions of Wu a
 
 ## GARL and DDAL
 
-GARL assigns one A2C agent to each stock-specific environment. Agents are independently initialised
-with seeds `seed + stock_index`; independent A2C uses the identical construction, so corresponding
-agents start alike across methods while agents within either method remain different. GARL agents
-first learn privately and later share timestamped gradient pieces. DDAL weights retrieved pieces by
-training maturity and task relevance; absolute training-return correlation is the pre-declared
-stock-task relevance proxy. `independent_a2c` is therefore the direct no-sharing ablation.
+GARL assigns one TCN-A2C agent to each stock-specific environment. Agents are independently
+initialised with seeds `seed + stock_index`; independent A2C uses the identical encoder, policy,
+value heads, construction, and seed contract, so corresponding agents start alike across methods
+while agents within either method remain different. GARL agents first learn privately and later share
+timestamped gradients across the complete encoder and actor-critic model. DDAL weights retrieved
+pieces by training maturity and task relevance; absolute training-return correlation is the
+pre-declared stock-task relevance proxy. `independent_a2c` is therefore the direct no-sharing
+ablation.
 
 The code reproduces Algorithm 1 with deterministic event-driven asynchrony. Every agent has an
 independent simulated clock, local epoch, environment, model, optimiser, and FIFO knowledge queue.
@@ -103,7 +114,9 @@ retrieved, matching the paper's experimental interpretation of `m` as the availa
 
 RL tuning exhaustively evaluates the nine combinations of rollout length `{16, 32, 64}` and
 learning-rate multiplier `{1/3, 1, 3}` on the latest embargoed pre-test validation segment. The same
-budget applies to every RL method and selected settings are reused for all ten evaluation seeds.
+budget applies to every RL method and selected settings are reused for all ten evaluation seeds. The
+TCN structure is fixed rather than added to the tuning search, limiting compute and avoiding another
+layer of model-selection variance.
 
 Training monitors a five-epoch moving mean reward. Burn-in states are not eligible checkpoints. A2C
 and PPO checkpoint only after at least 30 completed epochs; DQN waits until both the burn-in and its

@@ -41,6 +41,10 @@ def tune_rl_policy(
     garl_share_after_fraction: float,
     garl_share_every: int,
     garl_pool_size: int,
+    encoder_channels: int = 32,
+    encoder_kernel_size: int = 3,
+    encoder_dilations: tuple[int, ...] = (1, 2, 4, 8),
+    encoder_dropout: float = 0.0,
     device: str = "auto",
     objective_metric: str = "sharpe"
 ) -> dict:
@@ -96,6 +100,10 @@ def tune_rl_policy(
                 cost_rate=cost_rate,
                 seed=seed,
                 device=device,
+                encoder_channels=encoder_channels,
+                encoder_kernel_size=encoder_kernel_size,
+                encoder_dilations=encoder_dilations,
+                encoder_dropout=encoder_dropout,
                 short_borrow_bps_annual=short_borrow_bps_annual,
                 early_stopping_patience=min(early_stopping_patience, tune_epochs),
                 early_stopping_min_delta=early_stopping_min_delta,

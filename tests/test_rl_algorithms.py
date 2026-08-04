@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 from conftest import market_fixture
 
@@ -7,13 +8,36 @@ from garl_trading.rl import (
     train_independent_a2c,
     train_independent_dqn,
     train_independent_ppo,
+    train_joint_a2c,
     train_joint_dqn,
     train_joint_ppo,
 )
-from garl_trading.rl.core import RewardEarlyStopper
+from garl_trading.rl.core import RewardEarlyStopper, TemporalFeatureExtractor
 
 
-def test_ppo_and_dqn_joint_and_independent_policies_emit_position_matrices():
+def test_rl_temporal_extractor_is_causal_and_preserves_position_state():
+    torch.manual_seed(3)
+    extractor = TemporalFeatureExtractor(
+        observation_size=20 * 3 + 1,
+        lookback=20,
+        channels=8,
+        dropout=0.0,
+    ).eval()
+    original = torch.randn(1, 20, 3)
+    changed = original.clone()
+    changed[:, 12:, :] += 100
+
+    first = extractor.temporal_states(original)
+    second = extractor.temporal_states(changed)
+    assert torch.allclose(first[:, :, :12], second[:, :, :12])
+
+    observation = torch.cat([original.reshape(1, -1), torch.tensor([[0.5]])], dim=1)
+    encoded = extractor(observation)
+    assert encoded.shape == (1, 9)
+    assert np.isclose(float(encoded[0, -1].detach()), 0.5)
+
+
+def test_joint_a2c_ppo_and_dqn_and_independent_ppo_dqn_emit_position_matrices():
     dataset = build_dataset(market_fixture(("AAA", "BBB"), periods=280))
     split = 50
     train_features = {
@@ -41,11 +65,19 @@ def test_ppo_and_dqn_joint_and_independent_policies_emit_position_matrices():
         "cost_rate": 0.0007,
         "seed": 4,
     }
-    for trainer in (train_joint_ppo, train_independent_ppo, train_joint_dqn, train_independent_dqn):
+    for trainer in (
+        train_joint_a2c,
+        train_joint_ppo,
+        train_independent_ppo,
+        train_joint_dqn,
+        train_independent_dqn,
+    ):
         policy = trainer(train_features, train_closes, **common)
         positions = policy.positions(test_features, context=context)
         assert positions.shape == (5, 2)
         assert positions.abs().max().max() <= 1
+        models = policy.models.values() if isinstance(policy.models, dict) else (policy.models,)
+        assert all(hasattr(model, "extractor") for model in models)
 
 
 def test_early_stopping_checkpointing_starts_after_minimum_epochs():

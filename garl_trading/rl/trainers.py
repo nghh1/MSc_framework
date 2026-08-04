@@ -71,6 +71,10 @@ def train_independent_a2c(
     cost_rate: float,
     seed: int,
     device: str = "auto",
+    encoder_channels: int = 32,
+    encoder_kernel_size: int = 3,
+    encoder_dilations: tuple[int, ...] = (1, 2, 4, 8),
+    encoder_dropout: float = 0.0,
     short_borrow_bps_annual: float = 0.0,
     early_stopping_patience: int = 15,
     early_stopping_min_delta: float = 1e-4,
@@ -85,7 +89,16 @@ def train_independent_a2c(
     )
     observation_size = features[tickers[0]].shape[1] * lookback + 1
     models = initialise_asset_actor_critics(
-        tickers, observation_size, len(levels), seed, device
+        tickers,
+        observation_size,
+        len(levels),
+        seed,
+        device,
+        lookback=lookback,
+        encoder_channels=encoder_channels,
+        encoder_kernel_size=encoder_kernel_size,
+        encoder_dilations=encoder_dilations,
+        encoder_dropout=encoder_dropout,
     )
     optimizers, randoms = {}, {}
     for i, ticker in enumerate(tickers):
@@ -161,6 +174,10 @@ def train_joint_a2c(
     cost_rate: float,
     seed: int,
     device: str = "auto",
+    encoder_channels: int = 32,
+    encoder_kernel_size: int = 3,
+    encoder_dilations: tuple[int, ...] = (1, 2, 4, 8),
+    encoder_dropout: float = 0.0,
     short_borrow_bps_annual: float = 0.0,
     early_stopping_patience: int = 15,
     early_stopping_min_delta: float = 1e-4,
@@ -175,7 +192,16 @@ def train_joint_a2c(
     )
     per_asset_size = features[tickers[0]].shape[1] * lookback + 1
     torch.manual_seed(seed)
-    model = JointActorCritic(per_asset_size, len(tickers), len(levels)).to(device)
+    model = JointActorCritic(
+        per_asset_size,
+        len(tickers),
+        len(levels),
+        lookback=lookback,
+        encoder_channels=encoder_channels,
+        encoder_kernel_size=encoder_kernel_size,
+        encoder_dilations=encoder_dilations,
+        encoder_dropout=encoder_dropout,
+    ).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     rng = np.random.default_rng(seed)
     observations = {ticker: states[ticker].observation() for ticker in tickers}
@@ -270,6 +296,7 @@ def joint_positions(
     closes: dict[str, pd.Series] | None = None,
 ) -> pd.DataFrame:
     model = policy.models
+    model.eval()
     device = next(model.parameters()).device
     combined, locations, values = {}, {}, {}
     for ticker in policy.tickers:

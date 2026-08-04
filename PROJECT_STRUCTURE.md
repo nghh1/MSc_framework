@@ -126,7 +126,7 @@ reconstructed framework. The framework itself is:
 
 | File | Function |
 |---|---|
-| `rl/core.py` | Shared networks, exact sleeve state, matched GARL/ablation initialisation, reward-based early stopping, A2C gradients, scaling, and drift-aware inference. |
+| `rl/core.py` | Shared causal TCN encoder and actor-critic networks, exact sleeve state, matched GARL/ablation initialisation, reward-based early stopping, A2C gradients, scaling, and drift-aware inference. |
 | `rl/trainers.py` | A2C training for one joint multi-head policy and independent per-stock policies; also defines the common `RLPolicySet`. |
 | `rl/ppo.py` | PPO with generalized advantage estimation and clipped objectives for joint and independent policies. |
 | `rl/dqn.py` | DQN with replay, exploration, target networks, independent networks, and a shared branching multi-head joint network. |

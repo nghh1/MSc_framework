@@ -66,26 +66,151 @@ class RewardEarlyStopper:
             models.load_state_dict(self.best_state)
 
 
-class ActorCritic(nn.Module):
-    def __init__(self, observation_size: int, actions: int, hidden: int = 64):
+class CausalTemporalBlock(nn.Module):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: int,
+        dilation: int,
+        dropout: float,
+    ) -> None:
         super().__init__()
+        self.left_padding = (kernel_size - 1) * dilation
+        self.conv = nn.Conv1d(
+            in_channels,
+            out_channels,
+            kernel_size=kernel_size,
+            dilation=dilation,
+        )
+        self.residual = (
+            nn.Identity()
+            if in_channels == out_channels
+            else nn.Conv1d(in_channels, out_channels, kernel_size=1)
+        )
+        self.activation = nn.ReLU()
+        self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
+
+    def forward(self, values: torch.Tensor) -> torch.Tensor:
+        causal = nn.functional.pad(values, (self.left_padding, 0))
+        return self.dropout(self.activation(self.conv(causal) + self.residual(values)))
+
+
+class TemporalFeatureExtractor(nn.Module):
+    """Causal TCN over the market window, followed by the current portfolio position."""
+
+    def __init__(
+        self,
+        observation_size: int,
+        lookback: int,
+        channels: int = 32,
+        kernel_size: int = 3,
+        dilations: tuple[int, ...] = (1, 2, 4, 8),
+        dropout: float = 0.0,
+    ) -> None:
+        super().__init__()
+        market_size = observation_size - 1
+        if lookback < 2 or market_size <= 0 or market_size % lookback:
+            raise ValueError("Observation size must contain a complete temporal window plus position.")
+        if channels < 1 or kernel_size < 2 or not dilations or any(value < 1 for value in dilations):
+            raise ValueError("Invalid causal TCN encoder configuration.")
+        self.observation_size = observation_size
+        self.lookback = lookback
+        self.feature_count = market_size // lookback
+        self.channels = channels
+        blocks = []
+        in_channels = self.feature_count
+        for dilation in dilations:
+            blocks.append(
+                CausalTemporalBlock(
+                    in_channels,
+                    channels,
+                    kernel_size=kernel_size,
+                    dilation=dilation,
+                    dropout=dropout,
+                )
+            )
+            in_channels = channels
+        self.network = nn.Sequential(*blocks)
+        self.output_size = channels + 1
+
+    def temporal_states(self, market_window: torch.Tensor) -> torch.Tensor:
+        if market_window.shape[-2:] != (self.lookback, self.feature_count):
+            raise ValueError("Unexpected market-window shape for the temporal encoder.")
+        return self.network(market_window.transpose(-1, -2))
+
+    def forward(self, observation: torch.Tensor) -> torch.Tensor:
+        if observation.shape[-1] != self.observation_size:
+            raise ValueError("Unexpected observation width for the temporal encoder.")
+        market = observation[..., :-1].reshape(-1, self.lookback, self.feature_count)
+        temporal = self.temporal_states(market)[..., -1]
+        position = observation[..., -1:].reshape(-1, 1)
+        return torch.cat([temporal, position], dim=-1)
+
+
+class ActorCritic(nn.Module):
+    def __init__(
+        self,
+        observation_size: int,
+        actions: int,
+        hidden: int = 64,
+        *,
+        lookback: int = 20,
+        encoder_channels: int = 32,
+        encoder_kernel_size: int = 3,
+        encoder_dilations: tuple[int, ...] = (1, 2, 4, 8),
+        encoder_dropout: float = 0.0,
+    ) -> None:
+        super().__init__()
+        self.extractor = TemporalFeatureExtractor(
+            observation_size,
+            lookback,
+            channels=encoder_channels,
+            kernel_size=encoder_kernel_size,
+            dilations=encoder_dilations,
+            dropout=encoder_dropout,
+        )
         self.body = nn.Sequential(
-            nn.Linear(observation_size, hidden), nn.Tanh(), nn.Linear(hidden, hidden), nn.Tanh()
+            nn.Linear(self.extractor.output_size, hidden),
+            nn.Tanh(),
+            nn.Linear(hidden, hidden),
+            nn.Tanh(),
         )
         self.policy = nn.Linear(hidden, actions)
         self.value = nn.Linear(hidden, 1)
 
     def forward(self, observation):
-        hidden = self.body(observation)
+        hidden = self.body(self.extractor(observation))
         return self.policy(hidden), self.value(hidden).squeeze(-1)
 
 
 class JointActorCritic(nn.Module):
-    def __init__(self, per_asset_size: int, assets: int, actions: int, hidden: int = 128):
+    def __init__(
+        self,
+        per_asset_size: int,
+        assets: int,
+        actions: int,
+        hidden: int = 128,
+        *,
+        lookback: int = 20,
+        encoder_channels: int = 32,
+        encoder_kernel_size: int = 3,
+        encoder_dilations: tuple[int, ...] = (1, 2, 4, 8),
+        encoder_dropout: float = 0.0,
+    ) -> None:
         super().__init__()
         self.assets = assets
+        self.per_asset_size = per_asset_size
+        self.extractor = TemporalFeatureExtractor(
+            per_asset_size,
+            lookback,
+            channels=encoder_channels,
+            kernel_size=encoder_kernel_size,
+            dilations=encoder_dilations,
+            dropout=encoder_dropout,
+        )
         self.body = nn.Sequential(
-            nn.Linear(per_asset_size * assets, hidden),
+            nn.Linear(self.extractor.output_size * assets, hidden),
             nn.Tanh(),
             nn.Linear(hidden, hidden),
             nn.Tanh()
@@ -94,7 +219,10 @@ class JointActorCritic(nn.Module):
         self.value = nn.Linear(hidden, 1)
 
     def forward(self, observation):
-        hidden = self.body(observation)
+        asset_observations = observation.reshape(-1, self.assets, self.per_asset_size)
+        encoded = self.extractor(asset_observations.reshape(-1, self.per_asset_size))
+        encoded = encoded.reshape(-1, self.assets * self.extractor.output_size)
+        hidden = self.body(encoded)
         logits = torch.stack([head(hidden) for head in self.policies], dim=1)
         return logits, self.value(hidden).squeeze(-1)
 
@@ -166,13 +294,27 @@ def initialise_asset_actor_critics(
     observation_size: int,
     actions: int,
     seed: int,
-    device: torch.device
+    device: torch.device,
+    *,
+    lookback: int,
+    encoder_channels: int = 32,
+    encoder_kernel_size: int = 3,
+    encoder_dilations: tuple[int, ...] = (1, 2, 4, 8),
+    encoder_dropout: float = 0.0,
 ) -> dict[str, ActorCritic]:
     """Create matched but independently initialised stock agents for GARL and its ablation."""
     models = {}
     for agent_number, ticker in enumerate(tickers):
         torch.manual_seed(seed + agent_number)
-        models[ticker] = ActorCritic(observation_size, actions).to(device)
+        models[ticker] = ActorCritic(
+            observation_size,
+            actions,
+            lookback=lookback,
+            encoder_channels=encoder_channels,
+            encoder_kernel_size=encoder_kernel_size,
+            encoder_dilations=encoder_dilations,
+            encoder_dropout=encoder_dropout,
+        ).to(device)
     return models
 
 
@@ -276,6 +418,7 @@ def greedy_asset_positions(
     cost_rate: float = 0.0,
     short_borrow_rate: float = 0.0
 ) -> pd.Series:
+    model.eval()
     device = next(model.parameters()).device
     combined = pd.concat([context, features])
     combined = combined.loc[~combined.index.duplicated(keep="last")].sort_index()

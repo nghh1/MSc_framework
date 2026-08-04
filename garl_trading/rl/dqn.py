@@ -11,15 +11,34 @@ from torch import nn
 
 from garl_trading.utils import resolve_torch_device
 
-from .core import RewardEarlyStopper, fit_feature_scalers, make_states
+from .core import RewardEarlyStopper, TemporalFeatureExtractor, fit_feature_scalers, make_states
 from .trainers import RLPolicySet
 
 
 class QNetwork(nn.Module):
-    def __init__(self, observation_size: int, actions: int, hidden: int = 64):
+    def __init__(
+        self,
+        observation_size: int,
+        actions: int,
+        hidden: int = 64,
+        *,
+        lookback: int = 20,
+        encoder_channels: int = 32,
+        encoder_kernel_size: int = 3,
+        encoder_dilations: tuple[int, ...] = (1, 2, 4, 8),
+        encoder_dropout: float = 0.0,
+    ) -> None:
         super().__init__()
+        self.extractor = TemporalFeatureExtractor(
+            observation_size,
+            lookback,
+            channels=encoder_channels,
+            kernel_size=encoder_kernel_size,
+            dilations=encoder_dilations,
+            dropout=encoder_dropout,
+        )
         self.network = nn.Sequential(
-            nn.Linear(observation_size, hidden),
+            nn.Linear(self.extractor.output_size, hidden),
             nn.Tanh(),
             nn.Linear(hidden, hidden),
             nn.Tanh(),
@@ -27,15 +46,38 @@ class QNetwork(nn.Module):
         )
 
     def forward(self, observation):
-        return self.network(observation)
+        return self.network(self.extractor(observation))
 
 
 class BranchingQNetwork(nn.Module):
     """Shared representation with one discrete Q-value branch per stock."""
-    def __init__(self, per_asset_size: int, assets: int, actions: int, hidden: int = 128):
+
+    def __init__(
+        self,
+        per_asset_size: int,
+        assets: int,
+        actions: int,
+        hidden: int = 128,
+        *,
+        lookback: int = 20,
+        encoder_channels: int = 32,
+        encoder_kernel_size: int = 3,
+        encoder_dilations: tuple[int, ...] = (1, 2, 4, 8),
+        encoder_dropout: float = 0.0,
+    ) -> None:
         super().__init__()
+        self.assets = assets
+        self.per_asset_size = per_asset_size
+        self.extractor = TemporalFeatureExtractor(
+            per_asset_size,
+            lookback,
+            channels=encoder_channels,
+            kernel_size=encoder_kernel_size,
+            dilations=encoder_dilations,
+            dropout=encoder_dropout,
+        )
         self.body = nn.Sequential(
-            nn.Linear(per_asset_size * assets, hidden),
+            nn.Linear(self.extractor.output_size * assets, hidden),
             nn.Tanh(),
             nn.Linear(hidden, hidden),
             nn.Tanh()
@@ -43,7 +85,10 @@ class BranchingQNetwork(nn.Module):
         self.heads = nn.ModuleList([nn.Linear(hidden, actions) for _ in range(assets)])
 
     def forward(self, observation):
-        hidden = self.body(observation)
+        asset_observations = observation.reshape(-1, self.assets, self.per_asset_size)
+        encoded = self.extractor(asset_observations.reshape(-1, self.per_asset_size))
+        encoded = encoded.reshape(-1, self.assets * self.extractor.output_size)
+        hidden = self.body(encoded)
         return torch.stack([head(hidden) for head in self.heads], dim=1)
 
 
@@ -117,6 +162,10 @@ def train_independent_dqn(
     cost_rate: float,
     seed: int,
     device: str = "auto",
+    encoder_channels: int = 32,
+    encoder_kernel_size: int = 3,
+    encoder_dilations: tuple[int, ...] = (1, 2, 4, 8),
+    encoder_dropout: float = 0.0,
     epsilon_decay_fraction: float = 0.5,
     short_borrow_bps_annual: float = 0.0,
     early_stopping_patience: int = 15,
@@ -134,9 +183,21 @@ def train_independent_dqn(
     models, targets, optimizers, buffers, randoms = {}, {}, {}, {}, {}
     for i, ticker in enumerate(tickers):
         torch.manual_seed(seed + i)
-        models[ticker] = QNetwork(observation_size, len(levels)).to(device)
-        targets[ticker] = QNetwork(observation_size, len(levels)).to(device)
+        network_parameters = {
+            "lookback": lookback,
+            "encoder_channels": encoder_channels,
+            "encoder_kernel_size": encoder_kernel_size,
+            "encoder_dilations": encoder_dilations,
+            "encoder_dropout": encoder_dropout,
+        }
+        models[ticker] = QNetwork(
+            observation_size, len(levels), **network_parameters
+        ).to(device)
+        targets[ticker] = QNetwork(
+            observation_size, len(levels), **network_parameters
+        ).to(device)
         targets[ticker].load_state_dict(models[ticker].state_dict())
+        targets[ticker].eval()
         optimizers[ticker] = torch.optim.Adam(models[ticker].parameters(), lr=learning_rate)
         buffers[ticker] = ReplayBuffer(5000, seed + i)
         randoms[ticker] = np.random.default_rng(seed + i)
@@ -225,6 +286,10 @@ def train_joint_dqn(
     cost_rate: float,
     seed: int,
     device: str = "auto",
+    encoder_channels: int = 32,
+    encoder_kernel_size: int = 3,
+    encoder_dilations: tuple[int, ...] = (1, 2, 4, 8),
+    encoder_dropout: float = 0.0,
     epsilon_decay_fraction: float = 0.5,
     short_borrow_bps_annual: float = 0.0,
     early_stopping_patience: int = 15,
@@ -240,9 +305,21 @@ def train_joint_dqn(
     )
     per_asset_size = features[tickers[0]].shape[1] * lookback + 1
     torch.manual_seed(seed)
-    model = BranchingQNetwork(per_asset_size, len(tickers), len(levels)).to(device)
-    target = BranchingQNetwork(per_asset_size, len(tickers), len(levels)).to(device)
+    network_parameters = {
+        "lookback": lookback,
+        "encoder_channels": encoder_channels,
+        "encoder_kernel_size": encoder_kernel_size,
+        "encoder_dilations": encoder_dilations,
+        "encoder_dropout": encoder_dropout,
+    }
+    model = BranchingQNetwork(
+        per_asset_size, len(tickers), len(levels), **network_parameters
+    ).to(device)
+    target = BranchingQNetwork(
+        per_asset_size, len(tickers), len(levels), **network_parameters
+    ).to(device)
     target.load_state_dict(model.state_dict())
+    target.eval()
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     buffer = ReplayBuffer(5000, seed)
     rng = np.random.default_rng(seed)

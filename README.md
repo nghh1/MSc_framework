@@ -39,6 +39,8 @@ shares; it is not silently rebalanced every day.
 - RL methods are evaluated across 10 repeated seeds.
 - GARL and independent A2C use the same reproducible per-stock initialisation contract: agents are
   different from each other, while corresponding agents match across the direct ablation.
+- Every RL method uses the same causal 20-day TCN feature-extraction design; joint policies share the
+  encoder across stocks, while GARL and independent A2C retain identical per-stock networks.
 - Buy-and-hold and daily equal-weight rebalancing are distinct benchmarks produced from the same
   price snapshot.
 - ADX(14) and ROC(20) extend the causal indicators without duplicating the existing ROC(10), which

@@ -48,8 +48,8 @@ sufficient for CPU and supported Apple Silicon environments.
 1. Activate the environment and run the tests.
 2. Copy `configs/default.toml` to a named dissertation configuration and freeze tickers, dates,
    the zero risk-free-rate assumption, the 50-bps annual short-borrow assumption, costs, 10 seeds, folds,
-   the nine-point RL tuning grid, early-stopping settings, and device before looking at
-   final-holdout results.
+   the nine-point RL tuning grid, causal TCN encoder, five action levels, early-stopping settings,
+   and device before looking at final-holdout results.
 3. Run the full experiment:
 
    ```bash

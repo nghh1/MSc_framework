@@ -34,8 +34,12 @@ def test_ddal_relevance_uses_absolute_return_correlation():
 
 
 def test_garl_and_independent_ablation_share_reproducible_initialisation_contract():
-    first = initialise_asset_actor_critics(("A", "B"), 3, 2, 42, torch.device("cpu"))
-    second = initialise_asset_actor_critics(("A", "B"), 3, 2, 42, torch.device("cpu"))
+    first = initialise_asset_actor_critics(
+        ("A", "B"), 5, 2, 42, torch.device("cpu"), lookback=2
+    )
+    second = initialise_asset_actor_critics(
+        ("A", "B"), 5, 2, 42, torch.device("cpu"), lookback=2
+    )
     first_a = next(first["A"].parameters())
     first_b = next(first["B"].parameters())
     second_a = next(second["A"].parameters())

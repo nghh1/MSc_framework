@@ -63,6 +63,11 @@ class ModelsConfig:
         "garl_ddal",
     )
     lookback: int = 20
+    rl_feature_extractor: str = "tcn"
+    rl_encoder_channels: int = 32
+    rl_encoder_kernel_size: int = 3
+    rl_encoder_dilations: tuple[int, ...] = (1, 2, 4, 8)
+    rl_encoder_dropout: float = 0.0
     train_epochs: int = 100
     rollout_length: int = 32
     learning_rate: float = 3e-4
@@ -110,6 +115,21 @@ class FrameworkConfig:
             raise ValueError("repetitions must be positive.")
         if self.models.lookback < 2 or self.models.train_epochs < 1:
             raise ValueError("lookback must be >= 2 and train_epochs must be positive.")
+        if self.models.rl_feature_extractor != "tcn":
+            raise ValueError("The registered RL feature extractor must be 'tcn'.")
+        if self.models.rl_encoder_channels < 1 or self.models.rl_encoder_kernel_size < 2:
+            raise ValueError("RL TCN channels must be positive and kernel size must be >= 2.")
+        if not self.models.rl_encoder_dilations or any(
+            dilation < 1 for dilation in self.models.rl_encoder_dilations
+        ):
+            raise ValueError("RL TCN dilations must be non-empty positive integers.")
+        if not 0 <= self.models.rl_encoder_dropout < 1:
+            raise ValueError("RL TCN dropout must lie in [0, 1).")
+        receptive_field = 1 + (self.models.rl_encoder_kernel_size - 1) * sum(
+            self.models.rl_encoder_dilations
+        )
+        if receptive_field < self.models.lookback:
+            raise ValueError("RL TCN receptive field must cover the complete lookback window.")
         if self.models.rollout_length < 2 or not 0 < self.models.gamma <= 1:
             raise ValueError("rollout_length must be >= 2 and gamma must lie in (0, 1].")
         if self.models.learning_rate <= 0:
