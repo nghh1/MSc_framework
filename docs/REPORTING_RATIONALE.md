@@ -1,5 +1,14 @@
 # Dissertation reporting design
 
+All baseline identities use one pre-registered high-contrast colour throughout the report. Every
+time-series curve uses a solid line without point markers; bar charts retain hatching and scatter
+plots use one common circular marker. GARL and both passive benchmarks receive stronger line weights
+to keep the primary comparison visible without changing any underlying values.
+
+Report-only regeneration reuses the run's existing cost-sensitivity table and redraws its figure.
+This table is an experiment artifact derived from the stored positions and execution scenarios, so
+replaying thousands of identical portfolio paths is unnecessary when only presentation changes.
+
 The previous four-panel overview was convenient for quick inspection but unsuitable for a
 dissertation: panels became small, shared legends were crowded, and each result could not be sized
 or captioned independently. The report generator now writes exactly one analytical graph per image.
@@ -19,7 +28,7 @@ or captioned independently. The report generator now writes exactly one analytic
 9. `cost_sensitivity.png` replays saved positions at common cost levels.
 10. `crash_period_cumulative_returns.png` is generated when daily returns exist. Its year is selected
    mechanically as the worst calendar year for buy-and-hold in the available evaluation sample.
-11. `training_reward.png` and `training_loss.png` diagnose convergence and early stopping. Loss is
+11. `training_reward.png` and `training_loss.png` diagnose fixed-step training. Loss is
     shown only as a within-algorithm trajectory because objectives differ across RL algorithms.
 
 The first three answer protocol, economic magnitude, and headline comparison. The remaining views
@@ -34,7 +43,8 @@ additional charts should answer a distinct research question rather than repeat 
 - `summary.csv` retains means, intervals, observation counts, analysis scope, and whether each
   interval is based on training seeds, walk-forward folds, or is not estimable.
 - `cost_sensitivity.csv` contains every replayed cost scenario.
-- `training_summary.csv` records completed epochs, early stopping, and training-reward endpoints.
+- `training_summary.csv` records completed epochs and training-reward endpoints; its early-stopping
+  field remains false when fixed-step training is configured.
 
 Headline aggregation uses the untouched final holdout when present. For stochastic RL methods, its
 t intervals describe variation across repeated training seeds only; they do not measure uncertainty

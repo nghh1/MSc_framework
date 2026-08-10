@@ -29,6 +29,8 @@ class RewardEarlyStopper:
         *,
         checkpoint_eligible: bool = True,
     ) -> bool:
+        if self.patience == 0:
+            return False
         completed_epochs = epoch + 1
         if completed_epochs <= self.minimum_epochs or not checkpoint_eligible:
             self.bad_epochs = 0
@@ -56,6 +58,8 @@ class RewardEarlyStopper:
         return should_stop
 
     def restore(self, models) -> None:
+        if self.patience == 0:
+            return
         if self.best_state is None:
             return
 

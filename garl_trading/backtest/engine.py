@@ -176,3 +176,51 @@ def run_buy_and_hold(
         turnover=turnover,
         costs=costs
     )
+
+
+def run_equal_weight_rebalanced(
+    closes: pd.DataFrame,
+    initial_capital: float,
+    transaction_cost_bps: float,
+    slippage_bps: float,
+) -> PortfolioResult:
+    """Rebalance to equal portfolio weights daily and charge drift-induced turnover."""
+    closes = closes.astype(float).sort_index()
+    asset_returns = closes.pct_change(fill_method=None).fillna(0.0)
+    cost_rate = (transaction_cost_bps + slippage_bps) / 10000
+    equal_weight = pd.Series(1.0 / max(1, closes.shape[1]), index=closes.columns)
+    pretrade = pd.Series(0.0, index=closes.columns)
+
+    weight_rows: list[pd.Series] = []
+    gross_values: list[float] = []
+    net_values: list[float] = []
+    cash_values: list[float] = []
+    turnover_values: list[float] = []
+    cost_values: list[float] = []
+
+    for step, date in enumerate(closes.index):
+        desired = pretrade.copy() if step == 0 else equal_weight.copy()
+        turnover = float((desired - pretrade).abs().sum())
+        gross_return = float((desired * asset_returns.loc[date]).sum())
+        total_cost = turnover * cost_rate
+        net_return = gross_return - total_cost
+
+        denominator = max(1.0 + net_return, 1e-12)
+        pretrade = desired * (1.0 + asset_returns.loc[date]) / denominator
+        weight_rows.append(desired)
+        gross_values.append(gross_return)
+        net_values.append(net_return)
+        cash_values.append(float(1.0 - desired.sum()))
+        turnover_values.append(turnover)
+        cost_values.append(total_cost)
+
+    held_weights = pd.DataFrame(weight_rows, index=closes.index, columns=closes.columns)
+    return _finish_result(
+        initial_capital=initial_capital,
+        net_returns=pd.Series(net_values, index=closes.index, name="net_return"),
+        gross_returns=pd.Series(gross_values, index=closes.index, name="gross_return"),
+        held_weights=held_weights,
+        cash_exposure=pd.Series(cash_values, index=closes.index, name="cash_exposure"),
+        turnover=pd.Series(turnover_values, index=closes.index, name="turnover"),
+        costs=pd.Series(cost_values, index=closes.index, name="cost"),
+    )

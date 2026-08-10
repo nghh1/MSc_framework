@@ -6,11 +6,11 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from garl_trading.backtest import run_buy_and_hold, run_portfolio
+from garl_trading.backtest import run_buy_and_hold, run_equal_weight_rebalanced, run_portfolio
 from garl_trading.config import FrameworkConfig
 from garl_trading.data import build_dataset, load_market_data
 from garl_trading.data.features import FEATURE_COLUMNS
-from garl_trading.garl import train_garl_ddal
+from garl_trading.garl import train_garl_ddal, train_selective_garl_ddal
 from garl_trading.models import ModelContext, create_forecaster
 from garl_trading.rl import (
     train_independent_a2c,
@@ -144,8 +144,13 @@ class ExperimentRunner:
             buy_hold,
         )
 
-        positions = pd.DataFrame(1.0, index=dataset.index[fold.test], columns=dataset.tickers)
-        result = self.backtest(closes, positions)
+        result = run_equal_weight_rebalanced(
+            close_frame,
+            initial_capital=execution.initial_capital,
+            transaction_cost_bps=execution.transaction_cost_bps,
+            slippage_bps=execution.slippage_bps,
+        )
+        positions = result.held_positions
         self.save_result(
             store,
             self.metadata("equal_weight_rebalanced", fold, 0, self.config.experiment.seed),
@@ -259,6 +264,7 @@ class ExperimentRunner:
                         seed=cfg.experiment.seed,
                         levels=cfg.execution.position_levels,
                         lookback=cfg.models.lookback,
+                        rollout_length=cfg.models.rollout_length,
                         final_epochs=cfg.models.train_epochs,
                         learning_rate=cfg.models.learning_rate,
                         gamma=cfg.models.gamma,
@@ -274,6 +280,9 @@ class ExperimentRunner:
                         garl_share_after_fraction=cfg.models.garl_share_after_fraction,
                         garl_share_every=cfg.models.garl_share_every,
                         garl_pool_size=cfg.models.garl_pool_size,
+                        selective_garl_alignment_threshold=(
+                            cfg.models.selective_garl_alignment_threshold
+                        ),
                         encoder_channels=cfg.models.rl_encoder_channels,
                         encoder_kernel_size=cfg.models.rl_encoder_kernel_size,
                         encoder_dilations=cfg.models.rl_encoder_dilations,
@@ -307,6 +316,16 @@ class ExperimentRunner:
                     share_after_fraction=cfg.models.garl_share_after_fraction,
                     share_every=cfg.models.garl_share_every,
                     pool_size=cfg.models.garl_pool_size or None,
+                    **common,
+                )
+            elif name == "selective_garl_ddal":
+                policy = train_selective_garl_ddal(
+                    train_features,
+                    train_closes,
+                    share_after_fraction=cfg.models.garl_share_after_fraction,
+                    share_every=cfg.models.garl_share_every,
+                    pool_size=cfg.models.garl_pool_size or None,
+                    alignment_threshold=cfg.models.selective_garl_alignment_threshold,
                     **common,
                 )
             else:

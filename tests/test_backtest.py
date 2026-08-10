@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from garl_trading.backtest import run_buy_and_hold, run_portfolio
+from garl_trading.backtest import run_buy_and_hold, run_equal_weight_rebalanced, run_portfolio
 from garl_trading.rl.core import TradingState
 
 
@@ -54,9 +54,8 @@ def test_buy_and_hold_is_not_daily_equal_weight_rebalancing():
         {"A": [100.0, 100.0, 200.0, 200.0], "B": [100.0, 100.0, 100.0, 200.0]},
         index=index
     )
-    rebalanced = run_portfolio(
+    rebalanced = run_equal_weight_rebalanced(
         closes,
-        pd.DataFrame(1.0, index=index, columns=closes.columns),
         initial_capital=100.0,
         transaction_cost_bps=0.0,
         slippage_bps=0.0
@@ -70,6 +69,10 @@ def test_buy_and_hold_is_not_daily_equal_weight_rebalancing():
     assert np.isclose(buy_hold.metrics["total_return"], 1.0)
     assert np.isclose(rebalanced.metrics["total_return"], 1.25)
     assert not np.allclose(buy_hold.held_weights, rebalanced.held_weights)
+    assert np.count_nonzero(buy_hold.turnover.to_numpy()) == 1
+    assert np.count_nonzero(rebalanced.turnover.to_numpy()) > 1
+    assert np.allclose(buy_hold.held_weights.iloc[0], 0.0)
+    assert np.allclose(buy_hold.held_weights.iloc[1], 0.5)
 
 
 def test_uninvested_cash_has_zero_return_and_is_reported():

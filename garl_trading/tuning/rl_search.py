@@ -7,7 +7,7 @@ import optuna
 import pandas as pd
 
 from garl_trading.backtest import run_portfolio
-from garl_trading.garl import train_garl_ddal
+from garl_trading.garl import train_garl_ddal, train_selective_garl_ddal
 from garl_trading.rl import (
     train_independent_a2c,
     train_independent_dqn,
@@ -26,6 +26,7 @@ def tune_rl_policy(
     seed: int,
     levels: tuple[float, ...],
     lookback: int,
+    rollout_length: int,
     final_epochs: int,
     learning_rate: float,
     gamma: float,
@@ -41,6 +42,7 @@ def tune_rl_policy(
     garl_share_after_fraction: float,
     garl_share_every: int,
     garl_pool_size: int,
+    selective_garl_alignment_threshold: float,
     encoder_channels: int = 32,
     encoder_kernel_size: int = 3,
     encoder_dilations: tuple[int, ...] = (1, 2, 4, 8),
@@ -55,7 +57,7 @@ def tune_rl_policy(
     train_positions = np.arange(0, train_end)
     validation_positions = np.arange(split, n)
     if not len(validation_positions):
-        return {"rollout_length": 32, "learning_rate": learning_rate}
+        return {"learning_rate": learning_rate}
 
     trainers: dict[str, Callable] = {
         "single_a2c": train_joint_a2c,
@@ -64,7 +66,8 @@ def tune_rl_policy(
         "independent_a2c": train_independent_a2c,
         "independent_ppo": train_independent_ppo,
         "independent_dqn": train_independent_dqn,
-        "garl_ddal": train_garl_ddal
+        "garl_ddal": train_garl_ddal,
+        "selective_garl_ddal": train_selective_garl_ddal,
     }
     trainer = trainers[name]
     train_features = {t: frame.iloc[train_positions] for t, frame in features.items()}
@@ -77,25 +80,29 @@ def tune_rl_policy(
 
     def objective(trial: optuna.Trial) -> float:
         params = {
-            "rollout_length": trial.suggest_categorical("rollout_length", [16, 32, 64]),
             "learning_rate": trial.suggest_float(
                 "learning_rate", learning_rate / 3, learning_rate * 3, log=True
             )
         }
         try:
             algorithm_parameters = {}
-            if name == "garl_ddal":
+            if name in {"garl_ddal", "selective_garl_ddal"}:
                 algorithm_parameters = {
                     "share_after_fraction": garl_share_after_fraction,
                     "share_every": garl_share_every,
                     "pool_size": garl_pool_size or None
                 }
+                if name == "selective_garl_ddal":
+                    algorithm_parameters["alignment_threshold"] = (
+                        selective_garl_alignment_threshold
+                    )
             policy = trainer(
                 train_features,
                 train_closes,
                 levels=levels,
                 lookback=lookback,
                 epochs=tune_epochs,
+                rollout_length=rollout_length,
                 gamma=gamma,
                 cost_rate=cost_rate,
                 seed=seed,
@@ -130,12 +137,11 @@ def tune_rl_policy(
             return -10.0
 
     search_space = {
-        "rollout_length": [16, 32, 64],
-        "learning_rate": [learning_rate / 3, learning_rate, learning_rate * 3],
+        "learning_rate": np.geomspace(learning_rate / 3, learning_rate * 3, 9).tolist(),
     }
     study = optuna.create_study(
         direction="maximize",
         sampler=optuna.samplers.GridSampler(search_space, seed=seed),
     )
-    study.optimize(objective, n_trials=min(trials, 9), show_progress_bar=False)
+    study.optimize(objective, n_trials=min(trials, len(search_space["learning_rate"])), show_progress_bar=False)
     return study.best_params

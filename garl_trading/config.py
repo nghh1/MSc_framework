@@ -39,7 +39,7 @@ class ExecutionConfig:
     transaction_cost_bps: float = 5.0
     slippage_bps: float = 2.0
     short_borrow_bps_annual: float = 50.0
-    position_levels: tuple[float, ...] = (-1.0, -0.5, 0.0, 0.5, 1.0)
+    position_levels: tuple[float, ...] = (-1.0, 0.0, 1.0)
 
 
 @dataclass(frozen=True)
@@ -61,6 +61,7 @@ class ModelsConfig:
         "independent_ppo",
         "independent_dqn",
         "garl_ddal",
+        "selective_garl_ddal",
     )
     lookback: int = 20
     rl_feature_extractor: str = "tcn"
@@ -72,12 +73,14 @@ class ModelsConfig:
     rollout_length: int = 32
     learning_rate: float = 3e-4
     gamma: float = 0.95
-    early_stopping_patience: int = 15
+    # Zero disables checkpoint-based early stopping and keeps the final fixed-step model.
+    early_stopping_patience: int = 0
     early_stopping_min_delta: float = 1e-4
     minimum_train_epochs: int = 30
     garl_share_after_fraction: float = 0.3
-    garl_share_every: int = 4
+    garl_share_every: int = 2
     garl_pool_size: int = 0
+    selective_garl_alignment_threshold: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -134,14 +137,18 @@ class FrameworkConfig:
             raise ValueError("rollout_length must be >= 2 and gamma must lie in (0, 1].")
         if self.models.learning_rate <= 0:
             raise ValueError("learning_rate must be positive.")
-        if self.models.early_stopping_patience < 1 or self.models.minimum_train_epochs < 1:
-            raise ValueError("Early-stopping patience and minimum epochs must be positive.")
+        if self.models.early_stopping_patience < 0 or self.models.minimum_train_epochs < 1:
+            raise ValueError(
+                "Early-stopping patience must be non-negative and minimum epochs positive."
+            )
         if self.models.early_stopping_min_delta < 0:
             raise ValueError("early_stopping_min_delta cannot be negative.")
         if not 0 <= self.models.garl_share_after_fraction < 1:
             raise ValueError("garl_share_after_fraction must lie in [0, 1).")
         if self.models.garl_share_every < 1 or self.models.garl_pool_size < 0:
             raise ValueError("GARL sharing interval must be positive and pool size non-negative.")
+        if not -1 <= self.models.selective_garl_alignment_threshold < 1:
+            raise ValueError("Selective GARL alignment threshold must lie in [-1, 1).")
         if any(
             value < 0
             for value in (

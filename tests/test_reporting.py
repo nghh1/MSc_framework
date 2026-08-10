@@ -3,8 +3,33 @@ import json
 import numpy as np
 import pandas as pd
 
-from garl_trading.reporting.visualise import build_report
+from garl_trading.reporting.visualise import BASELINE_STYLES, build_report
 from garl_trading.reporting.visualise import summary as build_summary
+
+
+def test_every_baseline_has_a_unique_accessible_visual_style():
+    expected = {
+        "buy_and_hold",
+        "equal_weight_rebalanced",
+        "arimax_static",
+        "arimax_rolling",
+        "random_forest",
+        "lstm",
+        "tcn",
+        "tft",
+        "single_a2c",
+        "single_ppo",
+        "single_dqn",
+        "independent_a2c",
+        "independent_ppo",
+        "independent_dqn",
+        "garl_ddal",
+        "selective_garl_ddal",
+    }
+    assert set(BASELINE_STYLES) == expected
+    assert len({style[0] for style in BASELINE_STYLES.values()}) == len(expected)
+    assert all(style[1] == "-" for style in BASELINE_STYLES.values())
+    assert all(style[2] == "" for style in BASELINE_STYLES.values())
 
 
 def test_summary_reports_seed_and_fold_uncertainty():

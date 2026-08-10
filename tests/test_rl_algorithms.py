@@ -114,6 +114,23 @@ def test_early_stopping_respects_algorithm_checkpoint_gate():
     assert stopper.best_epoch == 2
 
 
+def test_zero_patience_disables_stopping_and_checkpoint_restoration():
+    model = torch.nn.Linear(1, 1)
+    stopper = RewardEarlyStopper(patience=0, min_delta=0.0, minimum_epochs=1)
+
+    original = model.weight.detach().clone()
+    for epoch in range(10):
+        assert not stopper.update(epoch, 1.0 - epoch, model)
+    with torch.no_grad():
+        model.weight.add_(1.0)
+    changed = model.weight.detach().clone()
+    stopper.restore(model)
+
+    assert stopper.best_state is None
+    assert not torch.allclose(original, changed)
+    assert torch.allclose(model.weight, changed)
+
+
 def test_independent_a2c_retains_per_agent_training_diagnostics():
     dataset = build_dataset(market_fixture(("AAA", "BBB"), periods=280))
     features = {

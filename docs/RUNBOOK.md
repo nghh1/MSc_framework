@@ -48,8 +48,9 @@ sufficient for CPU and supported Apple Silicon environments.
 1. Activate the environment and run the tests.
 2. Copy `configs/default.toml` to a named dissertation configuration and freeze tickers, dates,
    the zero risk-free-rate assumption, the 50-bps annual short-borrow assumption, costs, 10 seeds, folds,
-   the nine-point RL tuning grid, causal TCN encoder, five action levels, early-stopping settings,
-   and device before looking at final-holdout results.
+   the nine-point learning-rate grid, fixed 32-step RL rollout, causal TCN encoder, three action
+   levels, fixed-step training settings,
+   selective-GARL alignment threshold, and device before looking at final-holdout results.
 3. Run the full experiment:
 
    ```bash
@@ -80,6 +81,11 @@ true buy-and-hold, daily equal-weight rebalancing, all supervised models, and ev
 baseline. Artifacts are flushed after each period, so a partial run remains diagnosable. Reporting
 reads saved artifacts only; it never retrains a model or downloads revised prices.
 
-Nine RL trials exhaust the configured 3-by-3 rollout/learning-rate grid. Ten RL seeds balance
+Nine RL trials exhaust the configured logarithmic learning-rate grid while rollout length remains
+fixed at 32. Ten RL seeds balance
 stochastic uncertainty estimation against computation. Run a one-seed smoke
 configuration first, but retain all 10 predeclared seeds for the dissertation run.
+
+The rebuilt comparison retains every original method and adds `selective_garl_ddal`. Do not delete
+or overwrite the completed original run. Existing-period results for the selective extension are
+post-hoc; archive them under a new run ID and distinguish them from the original confirmatory run.

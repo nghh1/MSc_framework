@@ -126,7 +126,7 @@ reconstructed framework. The framework itself is:
 
 | File | Function |
 |---|---|
-| `rl/core.py` | Shared causal TCN encoder and actor-critic networks, exact sleeve state, matched GARL/ablation initialisation, reward-based early stopping, A2C gradients, scaling, and drift-aware inference. |
+| `rl/core.py` | Shared causal TCN encoder and actor-critic networks, exact sleeve state, matched GARL/ablation initialisation, optional checkpoint stopping, A2C gradients, scaling, and drift-aware inference. |
 | `rl/trainers.py` | A2C training for one joint multi-head policy and independent per-stock policies; also defines the common `RLPolicySet`. |
 | `rl/ppo.py` | PPO with generalized advantage estimation and clipped objectives for joint and independent policies. |
 | `rl/dqn.py` | DQN with replay, exploration, target networks, independent networks, and a shared branching multi-head joint network. |
@@ -155,7 +155,7 @@ baselines, while `independent_a2c` is the direct “GARL without sharing” abla
 | File | Function |
 |---|---|
 | `tuning/search.py` | Optuna inner-fold tuning for every supervised forecaster, including causal rolling-ARIMAX updates and consistent financing assumptions. |
-| `tuning/rl_search.py` | Exhaustive nine-point rollout-length/learning-rate grid on the latest embargoed validation segment; selected settings are reused across evaluation seeds. |
+| `tuning/rl_search.py` | Fixed-32-step rollout with a nine-point learning-rate grid on the latest embargoed validation segment; selected settings are reused across evaluation seeds. |
 | `experiment/runner.py` | Downloads price data, builds folds, tunes/trains/evaluates every baseline, repeats stochastic methods across seeds, runs two distinct passive benchmarks, checkpoints artifacts, and triggers reporting. |
 | `experiment/artifacts.py` | Creates a run directory and writes configuration, data snapshots, selected tuning parameters, metrics, positions, daily paths, RL training diagnostics, equity paths, and failures. |
 

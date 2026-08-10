@@ -115,6 +115,8 @@ class TorchSequenceForecaster(ForecastModel):
         self.model: nn.Module | None = None
         self.columns: list[str] = []
         self.history = pd.DataFrame()
+        self.target_mean = 0.0
+        self.target_std = 1.0
 
     def network(self, n_features: int) -> nn.Module:
         if self.architecture == "lstm":
@@ -139,7 +141,11 @@ class TorchSequenceForecaster(ForecastModel):
         x, y = features.loc[valid], targets.loc[valid]
         self.columns = list(x.columns)
         scaled = self.scaler.fit_transform(x)
-        xw, yw = self.windows(scaled, y.to_numpy(dtype=np.float32))
+        self.target_mean = float(y.mean())
+        target_std = float(y.std(ddof=0))
+        self.target_std = target_std if np.isfinite(target_std) and target_std > 1e-8 else 1.0
+        scaled_targets = ((y - self.target_mean) / self.target_std).to_numpy(dtype=np.float32)
+        xw, yw = self.windows(scaled, scaled_targets)
         if len(xw) < 20:
             raise ValueError("Insufficient sequence windows.")
         self.model = self.network(len(self.columns)).to(self.device)
@@ -184,7 +190,8 @@ class TorchSequenceForecaster(ForecastModel):
             window = torch.tensor(
                 scaled[i - self.lookback + 1 : i + 1], dtype=torch.float32, device=self.device
             ).unsqueeze(0)
-            predictions[date] = float(self.model(window).item())
+            scaled_prediction = float(self.model(window).item())
+            predictions[date] = scaled_prediction * self.target_std + self.target_mean
         return pd.Series(predictions).reindex(features.index)
 
 

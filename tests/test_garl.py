@@ -6,8 +6,12 @@ from garl_trading.data import build_dataset
 from garl_trading.data.features import FEATURE_COLUMNS
 from garl_trading.garl.ddal import (
     GradientPiece,
+    gradient_cosine_similarity,
+    positive_return_relevance,
     return_relevance,
+    selective_weighted_average,
     train_garl_ddal,
+    train_selective_garl_ddal,
     weighted_average,
 )
 from garl_trading.rl.core import initialise_asset_actor_critics
@@ -31,6 +35,33 @@ def test_ddal_relevance_uses_absolute_return_correlation():
     relevance = return_relevance(closes)
     assert relevance[("A", "A")] == 1.0
     assert relevance[("A", "B")] > 0.99
+
+
+def test_selective_relevance_rejects_negative_return_correlation():
+    index = pd.bdate_range("2020-01-01", periods=5)
+    closes = {
+        "A": pd.Series([100, 101, 103, 102, 105], index=index),
+        "B": pd.Series([100, 99, 97, 98, 95], index=index),
+    }
+    relevance = positive_return_relevance(closes)
+    assert relevance[("A", "A")] == 1.0
+    assert relevance[("A", "B")] == 0.0
+
+
+def test_selective_average_rejects_conflicting_peer_gradient():
+    local = GradientPiece([torch.tensor([1.0, 0.0])], "A", 2, 1.0)
+    aligned = GradientPiece([torch.tensor([2.0, 0.0])], "B", 2, 1.0)
+    conflicting = GradientPiece([torch.tensor([-2.0, 0.0])], "C", 2, 1.0)
+    averaged, diagnostics = selective_weighted_average(
+        local,
+        [aligned, conflicting],
+        alignment_threshold=0.0,
+    )
+    assert gradient_cosine_similarity(local.gradients, aligned.gradients) == 1.0
+    assert gradient_cosine_similarity(local.gradients, conflicting.gradients) == -1.0
+    assert diagnostics["peer_candidates"] == 2
+    assert diagnostics["peer_accepted"] == 1
+    assert torch.allclose(averaged[0], torch.tensor([1.5, 0.0]))
 
 
 def test_garl_and_independent_ablation_share_reproducible_initialisation_contract():
@@ -74,8 +105,40 @@ def test_garl_checkpoints_become_eligible_only_after_shared_updates():
 
     for agent in dataset.tickers:
         rows = [row for row in policy.diagnostics if row["agent"] == agent]
+        assert len(rows) == 4
+        assert all(row["update_kind"] in {"local", "shared"} for row in rows)
+        assert next(row["epoch"] for row in rows if row["shared_update"]) == 2
         assert any(row["checkpoint_eligible"] for row in rows)
         seen_shared_update = False
         for row in rows:
             seen_shared_update |= row["shared_update"]
             assert row["checkpoint_eligible"] == seen_shared_update
+
+
+def test_selective_garl_records_knowledge_acceptance_diagnostics():
+    dataset = build_dataset(market_fixture(("AAA", "BBB"), periods=280, seed=9))
+    features = {
+        ticker: dataset.features[ticker].iloc[:50].loc[:, FEATURE_COLUMNS]
+        for ticker in dataset.tickers
+    }
+    closes = {
+        ticker: dataset.prices[ticker]["close"].iloc[:50] for ticker in dataset.tickers
+    }
+    policy = train_selective_garl_ddal(
+        features,
+        closes,
+        levels=(-1.0, 0.0, 1.0),
+        lookback=5,
+        epochs=4,
+        rollout_length=4,
+        learning_rate=3e-4,
+        gamma=0.95,
+        cost_rate=0.0007,
+        seed=4,
+        share_after_fraction=0.25,
+        share_every=2,
+        minimum_train_epochs=1,
+    )
+    selection_rows = [row for row in policy.diagnostics if "peer_candidates" in row]
+    assert selection_rows
+    assert all(row["peer_accepted"] <= row["peer_candidates"] for row in selection_rows)

@@ -1,0 +1,30 @@
+# Experiment summary
+
+Headline scope: final holdout. Confidence level: 95%. All equity and cumulative-return figures are net of configured transaction costs, slippage, and short-borrow costs. Sharpe and Sortino ratios assume a zero risk-free rate. Final-holdout intervals describe variation across stochastic training seeds only; they are left blank for deterministic methods and do not measure uncertainty across market regimes.
+
+## Performance comparison
+
+| baseline | cumulative_return | annual_return | annual_volatility | sharpe_ratio | sortino_ratio | max_drawdown | cost_drag |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| equal_weight_rebalanced | 1.6616 | 0.3459 | 0.1880 | 1.8398 | 2.7720 | -0.2259 | 0.0159 |
+| buy_and_hold | 2.2806 | 0.4296 | 0.2503 | 1.7162 | 2.5998 | -0.2763 | 0.0023 |
+| tft | 0.0538 | 0.0176 | 0.0127 | 1.3937 | 3.5202 | -0.0091 | 0.0076 |
+| independent_ppo | 0.7264 | 0.1830 | 0.1295 | 1.3197 | 1.9714 | -0.1720 | 0.0446 |
+| random_forest | 0.0176 | 0.0059 | 0.0056 | 1.0442 | 1.6930 | -0.0067 | 0.0063 |
+| lstm | 0.0305 | 0.0102 | 0.0140 | 0.7254 | 1.1095 | -0.0151 | 0.0184 |
+| selective_garl_ddal | 0.2466 | 0.0677 | 0.0866 | 0.6473 | 1.0096 | -0.1258 | 0.1565 |
+| single_ppo | 0.1505 | 0.0238 | 0.0918 | 0.2979 | 0.5906 | -0.1841 | 0.0292 |
+| garl_ddal | 0.0847 | 0.0235 | 0.0806 | 0.2004 | 0.3646 | -0.1482 | 0.1506 |
+| tcn | 0.0022 | 0.0008 | 0.0088 | 0.0889 | 0.1641 | -0.0099 | 0.0155 |
+| arimax_static | -0.0379 | -0.0107 | 0.0679 | -0.1569 | -0.2401 | -0.1015 | 0.0354 |
+| single_a2c | -0.0567 | -0.0294 | 0.0785 | -0.2870 | -0.3382 | -0.2035 | 0.0892 |
+| independent_dqn | -0.1035 | -0.0350 | 0.0840 | -0.4437 | -0.6179 | -0.1952 | 0.2996 |
+| single_dqn | -0.1988 | -0.0722 | 0.0860 | -0.8604 | -1.1833 | -0.2566 | 0.2136 |
+| independent_a2c | -0.1858 | -0.0705 | 0.0723 | -0.9524 | -1.2413 | -0.2227 | 0.1186 |
+| arimax_rolling | -0.0600 | -0.0205 | 0.0215 | -0.9540 | -1.2326 | -0.0661 | 0.0427 |
+
+## Reporting design
+
+Each analytical view is saved as a separate figure so it can be placed, captioned, and scaled independently in the dissertation. The split timeline documents the experimental protocol; Sharpe ranking and fold paths address level and stability; net cumulative returns show economic magnitude; drawdown, turnover, and cost sensitivity cover risk and implementability. The active-only cumulative-return figure prevents the passive benchmark from compressing differences among trading strategies.
+
+The optional crash-period figure uses 2008, the worst available buy-and-hold year.

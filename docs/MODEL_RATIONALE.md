@@ -7,8 +7,10 @@ changes in response to test performance.
 ## Shared prediction and execution contract
 
 Every supervised model forecasts the next trading-day return for one stock. Forecasts are mapped
-continuously to `[-1, 1]` positions using a training-target volatility scale. Every RL policy selects
-one of `[-1, -0.5, 0, 0.5, 1]`. Each stock controls one fixed equal-capital sleeve. RL training and
+continuously to `[-1, 1]` positions using a training-target volatility scale. Deep sequence targets
+are standardised using training-only moments and forecasts are converted back to return units before
+position mapping. Every RL policy selects one of `[-1, 0, 1]`. Each stock controls one fixed
+equal-capital sleeve. RL training and
 backtesting use the same sleeve transition: the current exposure drifts with realised return, the
 next target trades from that drifted exposure, and transaction, slippage, and short-borrow costs are
 deducted before the sleeve returns are averaged. This exact shared contract is more important for
@@ -68,8 +70,9 @@ It is included because transaction costs make the problem state-dependent.
 Encoder dropout is fixed at zero. Random feature masking would make PPO's stored and recomputed
 action likelihoods depend on different dropout masks and would therefore distort the clipped
 likelihood ratio. Capacity is instead controlled through the 32-channel bottleneck and causal weight
-sharing. Discrete symmetric actions allow long, half-long, flat, half-short, and short exposure
-without giving one RL algorithm a different action space.
+sharing. Discrete symmetric actions allow long, flat, and short exposure without giving one RL
+algorithm a different action space. The three-action design reduces exploration complexity for the
+available sample size.
 
 The joint (`single_*`) policy applies one weight-shared TCN encoder to every stock, concatenates the
 nine compact stock representations, shares a two-layer portfolio representation, and uses one action
@@ -82,7 +85,7 @@ transfer knowledge, but avoid negative transfer and provide the cleanest control
   on-policy stability explains performance.
 - DQN adds replay, epsilon-greedy exploration, and target networks. The joint version is a branching
   DQN with one Q-value head per stock and a shared representation; it is not an exhaustive joint
-  action-value table over all `5^N` portfolio actions.
+  action-value table over all `3^N` portfolio actions.
 
 PPO and DQN are non-GARL baselines; they are not presented as extensions of Wu and Zeng's method.
 
@@ -99,35 +102,47 @@ ablation.
 
 The code reproduces Algorithm 1 with deterministic event-driven asynchrony. Every agent has an
 independent simulated clock, local epoch, environment, model, optimiser, and FIFO knowledge queue.
-After the private-learning threshold, every generated gradient is copied to every queue. Each agent
-independently retrieves and removes queued gradients on its own update schedule and applies the
-paper's experience/relevance weighted average. This reproduces learning semantics but simulates
+After the private-learning threshold, every generated gradient is copied to every peer queue while
+the originating agent continues learning locally. Each agent independently retrieves and removes
+queued peer gradients on its own update schedule. On an integration epoch, its current local
+gradient is combined with the retrieved experience/relevance-weighted peer gradients and exactly
+one optimiser update is applied. This reproduces learning semantics but simulates
 network/process timing in one process rather than claiming measured distributed-system speed. The
 implementation follows the mechanism in Wu and Zeng's GARL paper:
 <https://arxiv.org/abs/2202.05135>.
 
 Sharing begins after 30% of each agent's local epochs and each agent independently consumes its
-FIFO queue every four local epochs. `garl_pool_size = 0` means that all currently queued pieces are
+FIFO queue every two post-isolation local epochs. `garl_pool_size = 0` means that all currently queued pieces are
 retrieved, matching the paper's experimental interpretation of `m` as the available pool size.
+
+### Selective GARL extension
+
+`selective_garl_ddal` preserves the original private-learning threshold, asynchronous queues,
+A2C learner, architecture, seeds, costs, and training budget. It changes only the receiver-side
+use of shared gradients. Task relevance is positive signed training-return correlation rather than
+absolute correlation. A peer gradient is accepted only when its cosine alignment with the
+receiver's current local gradient exceeds the predeclared threshold (zero by default). Accepted
+pieces are weighted by training maturity, relevance, and alignment; the receiver's current local
+gradient is always retained, and it performs a local update when no peer passes the gate.
+
+The extension records candidate count, accepted count, acceptance rate, and mean accepted alignment
+at every selective update. It is an application-specific negative-transfer safeguard, not part of
+Wu and Zeng's original DDAL algorithm. Because it was designed after inspecting the first complete
+holdout, its results on the existing periods are exploratory unless confirmed on a newly frozen
+external dataset.
 
 ## RL tuning, stopping, and diagnostics
 
-RL tuning exhaustively evaluates the nine combinations of rollout length `{16, 32, 64}` and
-learning-rate multiplier `{1/3, 1, 3}` on the latest embargoed pre-test validation segment. The same
-budget applies to every RL method and selected settings are reused for all ten evaluation seeds. The
+RL tuning fixes rollout length at 32 and evaluates a nine-point logarithmic learning-rate grid on
+the latest embargoed pre-test validation segment. The same step budget applies to every RL method
+and selected settings are reused for all ten evaluation seeds. The
 TCN structure is fixed rather than added to the tuning search, limiting compute and avoiding another
 layer of model-selection variance.
 
-Training monitors a five-epoch moving mean reward. Burn-in states are not eligible checkpoints. A2C
-and PPO checkpoint only after at least 30 completed epochs; DQN waits until both the burn-in and its
-epsilon-decay phase have completed. GARL additionally requires each stock agent to have applied at
-least one shared-gradient update, so a reported GARL policy cannot silently restore a private,
-pre-DDAL state. After eligibility begins, training stops when the moving reward has not improved by
-`0.0001` for 15 epochs and restores the best eligible state.
-
-GARL and its direct independent-A2C ablation both apply stopping independently per stock agent. This
-keeps their checkpoint contract aligned so that DDAL sharing and asynchronous scheduling, rather
-than an aggregate-versus-local stopping rule, define the methodological difference. Reward, loss,
+Every RL method completes 100 rollout epochs of 32 environment interactions, for a fixed
+3,200-interaction budget per environment. Training-reward checkpoint selection is disabled because sequential rollout
+rewards reflect changing historical regimes and are not a stationary validation criterion. The
+final fixed-step parameters are evaluated. Reward, loss,
 entropy or epsilon where applicable, checkpoint eligibility, asynchronous queue size, and sharing
 events are saved for diagnosis. Loss magnitudes are algorithm-specific and must not be ranked across
 A2C, PPO, and DQN.

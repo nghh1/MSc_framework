@@ -8,7 +8,8 @@ Group-Agent Reinforcement Learning (GARL) with:
   Temporal Fusion Transformer (TFT);
 - one joint agent controlling all stocks with A2C, PPO, or DQN;
 - independent per-stock agents using A2C, PPO, or DQN;
-- Group-Agent Reinforcement Learning (GARL) with deterministic DDAL-style gradient sharing; and
+- Group-Agent Reinforcement Learning (GARL) with deterministic DDAL-style gradient sharing;
+- Selective GARL-DDAL with receiver-side relevance and gradient-alignment gating; and
 - equal-weight buy-and-hold and a separately labelled daily equal-weight rebalanced benchmark.
 
 ## Research lineage
@@ -18,6 +19,10 @@ Wu and Zeng in the University of Manchester paper. The GARL experiment is intent
 restricted to the A2C-based DDAL mechanism so its comparison with independent A2C agents
 isolates gradient sharing. PPO and DQN are additional non-GARL RL baselines; they are not
 presented as GARL variants.
+
+The original `garl_ddal` baseline is retained unchanged. `selective_garl_ddal` is a separately
+labelled post-hoc research extension motivated by negative transfer observed in the original run;
+it must not be described as Wu and Zeng's original algorithm.
 
 TCN refers to **Temporal Convolutional Network**. TFT refers to **Temporal Fusion Transformer**;
 this repository uses a simplified compact TFT implementation
@@ -45,7 +50,7 @@ shares; it is not silently rebalanced every day.
   price snapshot.
 - ADX(14) and ROC(20) extend the causal indicators without duplicating the existing ROC(10), which
   is already represented by `ret_10`.
-- RL training reward/loss diagnostics and early-stopping decisions are retained with the results.
+- RL training reward/loss diagnostics are retained with the fixed-step results.
 - Results, daily net/gross returns, costs, positions, equity curves, configuration, and
   the downloaded data snapshots are written to `results/`.
 - Reporting is independent from training and consumes tidy artifact tables.
