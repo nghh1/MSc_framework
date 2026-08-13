@@ -1,0 +1,108 @@
+{
+  "run_id": "garl_optimised_main-20260812T102922Z",
+  "created_at": "2026-08-12T10:29:22.346011+00:00",
+  "config": {
+    "experiment": {
+      "name": "garl_optimised_main",
+      "seed": 42,
+      "repetitions": 10,
+      "artifacts_dir": "results"
+    },
+    "data": {
+      "start": "2001-01-01",
+      "end": "2025-12-31",
+      "tickers": [
+        "NVDA",
+        "AAPL",
+        "MSFT",
+        "JPM",
+        "BAC",
+        "MS",
+        "CAT",
+        "RTX",
+        "BA"
+      ],
+      "adjust_prices": true
+    },
+    "validation": {
+      "outer_folds": 5,
+      "inner_folds": 3,
+      "min_train_bars": 1260,
+      "max_train_bars": 1864,
+      "embargo_bars": 1,
+      "final_holdout_start": "2023-01-01",
+      "use_final_holdout": true
+    },
+    "execution": {
+      "initial_capital": 100000.0,
+      "transaction_cost_bps": 5.0,
+      "slippage_bps": 2.0,
+      "short_borrow_bps_annual": 50.0,
+      "position_levels": [
+        -1.0,
+        0.0,
+        1.0
+      ]
+    },
+    "models": {
+      "device": "auto",
+      "supervised": [
+        "arimax_static",
+        "arimax_rolling",
+        "random_forest",
+        "lstm",
+        "tcn",
+        "transformer"
+      ],
+      "rl": [
+        "single_a2c",
+        "single_ppo",
+        "single_dqn",
+        "independent_a2c",
+        "independent_ppo",
+        "independent_dqn",
+        "garl_ddal",
+        "selective_garl_ddal"
+      ],
+      "lookback": 20,
+      "rl_feature_extractor": "tcn",
+      "rl_encoder_channels": 32,
+      "rl_encoder_kernel_size": 3,
+      "rl_encoder_dilations": [
+        1,
+        2,
+        4,
+        8
+      ],
+      "rl_encoder_dropout": 0.0,
+      "supervised_risk_aversion": 10.0,
+      "train_epochs": 100,
+      "rollout_length": 32,
+      "learning_rate": 0.0003,
+      "gamma": 0.95,
+      "turnover_penalty_multiplier": 1.0,
+      "early_stopping_patience": 0,
+      "early_stopping_min_delta": 0.0001,
+      "minimum_train_epochs": 30,
+      "garl_share_after_fraction": 0.3,
+      "garl_share_every": 2,
+      "garl_pool_size": 3,
+      "selective_garl_alignment_threshold": 0.0,
+      "selective_garl_peer_mix": 0.5
+    },
+    "tuning": {
+      "enabled": true,
+      "trials": 15,
+      "rl_trials": 9,
+      "objective": "sharpe"
+    },
+    "reporting": {
+      "formats": [
+        "png",
+        "csv",
+        "md"
+      ],
+      "confidence_level": 0.95
+    }
+  }
+}

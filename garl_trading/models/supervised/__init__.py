@@ -1,6 +1,6 @@
 from .arimax import RollingARIMAX, StaticARIMAX
 from .random_forest import RandomForestForecaster
-from .sequences import LSTMForecaster, TCNForecaster, TFTForecaster
+from .sequences import LSTMForecaster, TCNForecaster, TransformerForecaster
 
 __all__ = [
     "LSTMForecaster",
@@ -8,5 +8,5 @@ __all__ = [
     "RollingARIMAX",
     "StaticARIMAX",
     "TCNForecaster",
-    "TFTForecaster",
+    "TransformerForecaster",
 ]

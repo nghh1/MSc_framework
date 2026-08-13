@@ -33,11 +33,12 @@ def parameters(name: str, trial: optuna.Trial) -> dict:
                 }
             )
         return values
-    if name in {"lstm", "tcn", "tft"}:
+    if name in {"lstm", "tcn", "transformer"}:
         return {
             "hidden": trial.suggest_categorical("hidden", [16, 32, 64]),
-            "dropout": trial.suggest_float("dropout", 0.0, 0.3),
-            "learning_rate": trial.suggest_float("learning_rate", 1e-4, 3e-3, log=True),
+            "learning_rate": trial.suggest_float(
+                "learning_rate", 3e-4, 1.5e-3, log=True
+            ),
             "epochs": trial.suggest_int("epochs", 10, 30, step=10),
         }
     return {}
@@ -55,6 +56,7 @@ def tune_forecaster(
     transaction_cost_bps: float,
     slippage_bps: float,
     short_borrow_bps_annual: float,
+    risk_aversion: float = 10.0,
     objective_metric: str = "sharpe",
 ) -> dict:
     def objective(trial: optuna.Trial) -> float:
@@ -62,7 +64,9 @@ def tune_forecaster(
         scores = []
         for fold in inner_folds:
             try:
-                model = create_forecaster(name, seed=seed, **params)
+                model = create_forecaster(
+                    name, seed=seed, risk_aversion=risk_aversion, **params
+                )
                 model.fit(features.iloc[fold.train], targets.iloc[fold.train])
                 context_positions = np.arange(max(0, fold.test[0] - 19), fold.test[0])
                 context = ModelContext(

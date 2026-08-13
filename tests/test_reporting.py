@@ -16,7 +16,7 @@ def test_every_baseline_has_a_unique_accessible_visual_style():
         "random_forest",
         "lstm",
         "tcn",
-        "tft",
+        "transformer",
         "single_a2c",
         "single_ppo",
         "single_dqn",
@@ -152,6 +152,22 @@ def test_report_emits_each_dissertation_figure_as_a_separate_file(tmp_path):
     pd.DataFrame(equity_rows).to_csv(run_dir / "equity.csv", index=False)
     pd.DataFrame(position_rows).to_csv(run_dir / "positions.csv", index=False)
     pd.DataFrame(daily_rows).to_csv(run_dir / "daily_returns.csv", index=False)
+    prediction_rows = []
+    for date, actual in zip(dates[12:], np.linspace(-0.01, 0.012, 12), strict=True):
+        prediction_rows.append(
+            {
+                "date": date,
+                "ticker": "AAA",
+                "prediction": actual * 0.6,
+                "actual_return": actual,
+                "baseline": "random_forest",
+                "fold": 1,
+                "fold_kind": "final_holdout",
+                "repetition": 0,
+                "seed": 42,
+            }
+        )
+    pd.DataFrame(prediction_rows).to_csv(run_dir / "predictions.csv", index=False)
 
     build_report(run_dir)
 
@@ -166,6 +182,8 @@ def test_report_emits_each_dissertation_figure_as_a_separate_file(tmp_path):
         "sharpe_over_time.png",
         "cost_sensitivity.png",
         "crash_period_cumulative_returns.png",
+        "prediction_vs_actual_random_forest.png",
+        "trade_actions_garl_ddal_AAA.png",
     }
     assert expected_figures == {path.name for path in report_dir.glob("*.png")}
     assert (report_dir / "performance_comparison.csv").exists()

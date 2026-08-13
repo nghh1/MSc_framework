@@ -7,7 +7,13 @@ changes in response to test performance.
 ## Shared prediction and execution contract
 
 Every supervised model forecasts the next trading-day return for one stock. Forecasts are mapped
-continuously to `[-1, 1]` positions using a training-target volatility scale. Deep sequence targets
+continuously to `[-1, 1]` using the constrained single-asset mean-variance rule
+`position = clip(predicted_return / (risk_aversion * training_return_variance), -1, 1)`.
+The shared risk-aversion coefficient is fixed at 10 for every model and stock, while variance is
+estimated only from that model's outer-training targets. This is the unconstrained optimum for a
+quadratic expected-utility approximation followed by the experiment's no-leverage/no-short-beyond-one
+constraint. It replaces an arbitrary nonlinear signal squashing constant without using test data.
+Deep sequence targets
 are standardised using training-only moments and forecasts are converted back to return units before
 position mapping. Every RL policy selects one of `[-1, 0, 1]`. Each stock controls one fixed
 equal-capital sleeve. RL training and
@@ -20,31 +26,31 @@ The 20-day lookback represents roughly one trading month. Hidden dimensions are 
 small and tuned only on inner folds because daily equity data provide thousands, not millions, of
 independent observations. Larger networks would add variance and compute without a defensible
 sample-size basis.
+Sequence-model dropout is fixed at 0.2 rather than tuned. Their Adam learning-rate search is bounded
+to $[3\times10^{-4}, 1.5\times10^{-3}]$, avoiding both near-static and excessively aggressive fits.
 
 ## LSTM
 
-The LSTM uses one or more recurrent layers, the final hidden state, and a two-layer point-forecast
+The LSTM uses two recurrent layers, the final hidden state, and a two-layer point-forecast
 head. LSTM gates provide a direct baseline for persistent and decaying temporal relationships such
 as volatility clustering. The final state is appropriate because the target is one-step-ahead rather
-than a sequence. Dropout is active between recurrent layers only when more than one layer is used;
-the hidden width, dropout, learning rate, and epochs are selected on inner folds.
+than a sequence. Dropout is fixed at 0.2 between the recurrent layers; the hidden width, learning
+rate, and epochs are selected on inner folds.
 
 ## Temporal Convolutional Network
 
-The TCN has four residual causal convolution blocks with kernel size 3 and dilations 1, 2, 4, and
-8. Its receptive field is 31 observations, so it covers the configured 20-day lookback. Left-only
-padding makes every intermediate state causal. Residual paths improve optimisation, while dropout
-regularises a network that otherwise can fit short-lived patterns. The TCN contrasts recurrent
-memory with a parallel, fixed receptive field under a similar hidden-width budget.
+The TCN has four residual causal blocks with kernel size 3 and dilations 1, 2, 4, and 8. Each block
+contains two repetitions of causal convolution, weight normalisation, ReLU, and fixed 0.2 dropout
+before its residual addition. Its receptive field covers the configured 20-day lookback. The TCN
+contrasts recurrent memory with a parallel, fixed receptive field under a similar hidden-width budget.
 
-## Compact Temporal Fusion Transformer
+## Encoder-only Transformer
 
-This is explicitly a compact TFT-inspired forecaster, not a full reproduction of the original
-multi-horizon TFT. A learned feature gate performs time-varying variable weighting, an LSTM encodes
-local order, causal multi-head self-attention captures longer interactions, and a gated residual plus
-layer normalisation stabilises the representation. A single linear head is used because the task is
-one-step point forecasting and the dataset has no known-future covariates. Calling it `compact TFT`
-in the dissertation avoids overstating equivalence to a full quantile, multi-horizon TFT.
+The conventional encoder-only Transformer uses a linear projection and learned positional encoding,
+followed by two pre-normalised causal Transformer
+encoder blocks with multi-head self-attention, GELU feed-forward layers, and fixed 0.2 dropout. Layer
+normalisation and a linear head map the final token to the one-step return forecast. A decoder is not
+required because the task produces one value rather than an autoregressive output sequence.
 
 ## Statistical and machine-learning baselines
 
@@ -80,50 +86,68 @@ head per stock. This reduces the original immediate input compression from 3,429
 297 encoded values. Independent policies train one complete TCN-policy network per stock. They cannot
 transfer knowledge, but avoid negative transfer and provide the cleanest control for GARL.
 
-- A2C is the direct on-policy actor-critic reference and the base learner used by GARL.
+- A2C is the direct on-policy actor-critic reference and the base learner used by GARL. It uses
+  normalised generalised advantages but retains one unclipped update per rollout.
 - PPO adds clipped policy updates and generalised advantage estimation, testing whether improved
   on-policy stability explains performance.
-- DQN adds replay, epsilon-greedy exploration, and target networks. The joint version is a branching
+- DQN adds replay, epsilon-greedy exploration, Double-DQN targets, Huber loss, and target networks.
+  The joint version is a branching
   DQN with one Q-value head per stock and a shared representation; it is not an exhaustive joint
   action-value table over all `3^N` portfolio actions.
 
-PPO and DQN are non-GARL baselines; they are not presented as extensions of Wu and Zeng's method.
+All RL rewards contain actual execution costs. Inner validation may select a one- or two-times
+turnover penalty during training; two is regularisation only, while evaluation always deducts the
+actual cost exactly once. PPO and DQN are non-GARL baselines and are not presented as GARL variants.
 
 ## GARL and DDAL
 
-GARL assigns one TCN-A2C agent to each stock-specific environment. Agents are independently
-initialised with seeds `seed + stock_index`; independent A2C uses the identical encoder, policy,
-value heads, construction, and seed contract, so corresponding agents start alike across methods
-while agents within either method remain different. GARL agents first learn privately and later share
+GARL assigns one TCN-A2C agent to each stock-specific environment. Separate stock models are copied
+from one common parameter template so corresponding tensor coordinates retain a defensible shared
+meaning when raw gradients are exchanged. Independent A2C uses the same initialisation contract,
+while every agent retains its own environment, optimiser, random stream, and subsequent updates.
+GARL agents first learn privately and later share
 timestamped gradients across the complete encoder and actor-critic model. DDAL weights retrieved
 pieces by training maturity and task relevance; absolute training-return correlation is the
 pre-declared stock-task relevance proxy. `independent_a2c` is therefore the direct no-sharing
 ablation.
 
-The code reproduces Algorithm 1 with deterministic event-driven asynchrony. Every agent has an
-independent simulated clock, local epoch, environment, model, optimiser, and FIFO knowledge queue.
+The code reproduces the central learning semantics of Algorithm 1 with deterministic event-driven
+asynchrony. Every agent has an
+independent simulated clock, local epoch, environment, model, optimiser, and knowledge queue.
 After the private-learning threshold, every generated gradient is copied to every peer queue while
 the originating agent continues learning locally. Each agent independently retrieves and removes
-queued peer gradients on its own update schedule. On an integration epoch, its current local
-gradient is combined with the retrieved experience/relevance-weighted peer gradients and exactly
+queued peer gradients on its own update schedule. Only the newest queued gradient from each source
+is eligible, and an inner-validated pool bound limits stale transfer. On an integration epoch, its
+current local gradient is combined with the retrieved experience/relevance-weighted peer gradients and exactly
 one optimiser update is applied. This reproduces learning semantics but simulates
 network/process timing in one process rather than claiming measured distributed-system speed. The
-implementation follows the mechanism in Wu and Zeng's GARL paper:
+original DDAL weighted average exactly implements Wu and Zeng's equation: one half of the
+experience-normalised gradient average plus one half of the relevance-normalised gradient average.
+The surrounding implementation is an explicit adaptation: it simulates asynchronous timing in one
+process, clips the A2C gradient norm, uses cross-stock return correlation for relevance, and combines
+the receiver's current local gradient with queued peer pieces instead of replaying a stored local
+gradient pool. Its A2C estimator uses 32-step normalised generalised advantages, value loss, entropy regularisation,
+and gradient clipping, whereas the paper presents the core one-step advantage expression. It therefore
+follows the paper's mechanism without claiming a bit-for-bit reproduction:
 <https://arxiv.org/abs/2202.05135>.
 
-Sharing begins after 30% of each agent's local epochs and each agent independently consumes its
-FIFO queue every two post-isolation local epochs. `garl_pool_size = 0` means that all currently queued pieces are
-retrieved, matching the paper's experimental interpretation of `m` as the available pool size.
+Sharing begins after 30% of each agent's local epochs and each agent independently consumes recent
+peer knowledge every two post-isolation local epochs. At most one current gradient per source is
+eligible, and a common fixed pool size of three bounds how many sources enter one update for both
+GARL variants.
 
 ### Selective GARL extension
 
-`selective_garl_ddal` preserves the original private-learning threshold, asynchronous queues,
-A2C learner, architecture, seeds, costs, and training budget. It changes only the receiver-side
+`selective_garl_ddal` preserves the private-learning threshold, asynchronous queues, A2C learner,
+architecture, costs, and training budget. It changes only the receiver-side
 use of shared gradients. Task relevance is positive signed training-return correlation rather than
 absolute correlation. A peer gradient is accepted only when its cosine alignment with the
-receiver's current local gradient exceeds the predeclared threshold (zero by default). Accepted
-pieces are weighted by training maturity, relevance, and alignment; the receiver's current local
-gradient is always retained, and it performs a local update when no peer passes the gate.
+receiver's current local gradient exceeds an inner-validated threshold in `{0.0, 0.05, 0.1}`. A zero
+threshold therefore means any strictly positive alignment. Accepted peers
+retain DDAL's additive experience/relevance weighting, multiplied by their positive gradient alignment
+and renormalised within the accepted peer pool. The final update is a convex blend with a
+fixed 50% peer share. If no peer passes the gate, the update is fully local. This is
+a predeclared safeguard rather than a claim of mathematically optimal transfer.
 
 The extension records candidate count, accepted count, acceptance rate, and mean accepted alignment
 at every selective update. It is an application-specific negative-transfer safeguard, not part of
@@ -133,8 +157,15 @@ external dataset.
 
 ## RL tuning, stopping, and diagnostics
 
-RL tuning fixes rollout length at 32 and evaluates a nine-point logarithmic learning-rate grid on
-the latest embargoed pre-test validation segment. The same step budget applies to every RL method
+RL tuning fixes rollout length at 32. Each method evaluates nine predeclared profiles using three
+learning rates from half to twice the declared base rate on the latest embargoed pre-test validation
+segment. Turnover penalisation remains fixed at the actual configured cost multiplier of 1.0, so
+tuning does not optimise against artificial costs that differ from the final backtest. Selective
+GARL uses a balanced three-learning-rate by three-alignment-threshold grid with thresholds
+`{0.0, 0.05, 0.1}`; its entropy weight, peer mixture, and pool size remain fixed at 0.01, 0.5,
+and 3. Original GARL uses a balanced three-learning-rate by three-entropy-weight grid while fixing
+the same pool size of 3. The same
+step budget applies to every RL method
 and selected settings are reused for all ten evaluation seeds. The
 TCN structure is fixed rather than added to the tuning search, limiting compute and avoiding another
 layer of model-selection variance.

@@ -3,7 +3,12 @@ import pandas as pd
 import torch
 
 from garl_trading.models import ModelContext
-from garl_trading.models.supervised.sequences import TCN_custom, TorchSequenceForecaster
+from garl_trading.models.supervised.sequences import (
+    LSTMForecaster,
+    TCN_custom,
+    TorchSequenceForecaster,
+    Transformer_custom,
+)
 
 
 def test_tcn_hidden_states_are_strictly_causal():
@@ -20,6 +25,34 @@ def test_tcn_hidden_states_are_strictly_causal():
 def test_sequence_forecaster_resolves_auto_device():
     model = TorchSequenceForecaster(device="auto")
     assert model.device.type in {"cpu", "cuda", "mps"}
+
+
+def test_sequence_defaults_use_two_layers_and_fixed_dropout():
+    model = LSTMForecaster(device="cpu")
+    assert model.layers == 2
+    assert model.dropout == 0.2
+
+
+def test_transformer_is_causal_and_emits_one_value_per_sequence():
+    torch.manual_seed(7)
+    model = Transformer_custom(
+        n_features=3,
+        hidden=8,
+        heads=2,
+        layers=2,
+        dropout=0.0,
+        max_length=20,
+    ).eval()
+    original = torch.randn(1, 20, 3)
+    changed = original.clone()
+    changed[:, 12:, :] += 100
+    projected = model.project(original) + model.position[:, :20]
+    changed_projected = model.project(changed) + model.position[:, :20]
+    mask = torch.triu(torch.ones(20, 20, dtype=torch.bool), diagonal=1)
+    first = model.encoder(projected, mask=mask)
+    second = model.encoder(changed_projected, mask=mask)
+    assert torch.allclose(first[:, :12], second[:, :12], atol=1e-6)
+    assert model(original).shape == (1,)
 
 
 def test_sequence_targets_are_scaled_on_train_and_predictions_are_inverted():

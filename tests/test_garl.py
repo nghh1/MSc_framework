@@ -7,6 +7,7 @@ from garl_trading.data.features import FEATURE_COLUMNS
 from garl_trading.garl.ddal import (
     GradientPiece,
     gradient_cosine_similarity,
+    latest_peer_pieces,
     positive_return_relevance,
     return_relevance,
     selective_weighted_average,
@@ -61,7 +62,40 @@ def test_selective_average_rejects_conflicting_peer_gradient():
     assert gradient_cosine_similarity(local.gradients, conflicting.gradients) == -1.0
     assert diagnostics["peer_candidates"] == 2
     assert diagnostics["peer_accepted"] == 1
+    assert diagnostics["local_gradient_weight"] == 0.5
     assert torch.allclose(averaged[0], torch.tensor([1.5, 0.0]))
+
+
+def test_selective_average_keeps_local_anchor_when_many_peers_are_accepted():
+    local = GradientPiece([torch.tensor([2.0])], "A", 4, 1.0)
+    peers = [
+        GradientPiece([torch.tensor([10.0])], source, 4, 1.0)
+        for source in ("B", "C", "D", "E")
+    ]
+    averaged, diagnostics = selective_weighted_average(local, peers, peer_mix=0.5)
+    assert diagnostics["peer_accepted"] == 4
+    assert diagnostics["local_gradient_weight"] == 0.5
+    assert torch.allclose(averaged[0], torch.tensor([6.0]))
+
+
+def test_selective_average_falls_back_to_local_gradient():
+    local = GradientPiece([torch.tensor([1.0, 0.0])], "A", 2, 1.0)
+    conflicting = GradientPiece([torch.tensor([-2.0, 0.0])], "B", 2, 1.0)
+    averaged, diagnostics = selective_weighted_average(local, [conflicting])
+    assert diagnostics["peer_accepted"] == 0
+    assert diagnostics["local_gradient_weight"] == 1.0
+    assert torch.equal(averaged[0], local.gradients[0])
+
+
+def test_garl_queue_keeps_only_latest_gradient_from_each_source():
+    queue = [
+        GradientPiece([torch.tensor([1.0])], "B", 2, 1.0),
+        GradientPiece([torch.tensor([3.0])], "B", 4, 1.0),
+        GradientPiece([torch.tensor([2.0])], "C", 3, 1.0),
+    ]
+    selected = latest_peer_pieces(queue, pool_size=None)
+    assert queue == []
+    assert [(piece.source, piece.epoch) for piece in selected] == [("B", 4), ("C", 3)]
 
 
 def test_garl_and_independent_ablation_share_reproducible_initialisation_contract():
@@ -74,7 +108,8 @@ def test_garl_and_independent_ablation_share_reproducible_initialisation_contrac
     first_a = next(first["A"].parameters())
     first_b = next(first["B"].parameters())
     second_a = next(second["A"].parameters())
-    assert not torch.allclose(first_a, first_b)
+    assert first_a.data_ptr() != first_b.data_ptr()
+    assert torch.allclose(first_a, first_b)
     assert torch.allclose(first_a, second_a)
 
 

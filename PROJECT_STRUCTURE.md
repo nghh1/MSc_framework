@@ -120,16 +120,16 @@ reconstructed framework. The framework itself is:
 | `models/registry.py` | Maps configured baseline names to model constructors. |
 | `models/supervised/arimax.py` | Implements static ARIMAX and a causal rolling/refitting ARIMAX whose tuning and test-time update behavior match. |
 | `models/supervised/random_forest.py` | Random Forest next-bar-return regressor. |
-| `models/supervised/sequences.py` | Standardized sequence training and implementations of LSTM, Temporal Convolutional Network (TCN), and compact Temporal Fusion Transformer (TFT). |
+| `models/supervised/sequences.py` | Standardized sequence training and implementations of a two-layer LSTM, residual weight-normalised TCN, and encoder-only Transformer. |
 
 ### RL baselines
 
 | File | Function |
 |---|---|
-| `rl/core.py` | Shared causal TCN encoder and actor-critic networks, exact sleeve state, matched GARL/ablation initialisation, optional checkpoint stopping, A2C gradients, scaling, and drift-aware inference. |
+| `rl/core.py` | Shared causal TCN encoder and actor-critic networks, exact sleeve state, common-template GARL/ablation initialisation, normalised-GAE A2C gradients, scaling, and drift-aware inference. |
 | `rl/trainers.py` | A2C training for one joint multi-head policy and independent per-stock policies; also defines the common `RLPolicySet`. |
 | `rl/ppo.py` | PPO with generalized advantage estimation and clipped objectives for joint and independent policies. |
-| `rl/dqn.py` | DQN with replay, exploration, target networks, independent networks, and a shared branching multi-head joint network. |
+| `rl/dqn.py` | Double DQN with replay, Huber loss, exploration, target networks, independent networks, and a shared branching multi-head joint network. |
 
 The six non-GARL RL baselines are:
 
@@ -145,7 +145,7 @@ policy per stock.
 
 | File | Function |
 |---|---|
-| `garl/ddal.py` | Event-driven reproduction of Wu and Zeng's A2C/DDAL learning semantics with autonomous clocks, private early learning, FIFO queues, all-to-all asynchronous gradient delivery, and experience/relevance weighting. |
+| `garl/ddal.py` | Event-driven adaptation of Wu and Zeng's A2C/DDAL learning semantics with autonomous clocks, private early learning, recent per-source asynchronous gradient delivery, and experience/relevance weighting. |
 
 GARL is not extended to PPO or DQN. Those algorithms are retained as non-GARL contextual
 baselines, while `independent_a2c` is the direct “GARL without sharing” ablation.
@@ -182,7 +182,7 @@ calculated.
 | `tests/test_rl_algorithms.py` | Smoke-tests joint and independent PPO/DQN training and position output. |
 | `tests/test_reporting.py` | Verifies uncertainty aggregation. |
 | `tests/test_sequences.py` | Verifies TCN causality and automatic accelerator resolution. |
-| `tests/test_supervised_models.py` | End-to-end smoke test for ARIMAX, Random Forest, LSTM, TCN, and compact TFT position output. |
+| `tests/test_supervised_models.py` | End-to-end smoke test for ARIMAX, Random Forest, LSTM, TCN, and Transformer position output. |
 
 ## Files produced by a full experiment
 
@@ -204,6 +204,7 @@ results/<experiment-name>-<UTC-run-id>/
 ├── positions.csv
 ├── equity.csv
 ├── daily_returns.csv
+├── predictions.csv
 ├── training_diagnostics.csv
 ├── tuning_parameters.csv
 ├── failures.csv
@@ -225,6 +226,8 @@ results/<experiment-name>-<UTC-run-id>/
     ├── cost_sensitivity.csv
     ├── cost_sensitivity.png
     ├── crash_period_cumulative_returns.png
+    ├── prediction_vs_actual_<supervised-baseline>.png
+    ├── trade_actions_<active-baseline>_<ticker>.png
     ├── training_reward.png
     ├── training_loss.png
     └── training_summary.csv
@@ -239,6 +242,7 @@ results/<experiment-name>-<UTC-run-id>/
 | `positions.csv` | Long-form target position for every date, ticker, baseline, fold, repetition, and seed. |
 | `equity.csv` | Long-form net portfolio equity curve for every evaluation run. |
 | `daily_returns.csv` | Net and gross returns, explicit cost, turnover, and cash exposure by date for every evaluation run. |
+| `predictions.csv` | Out-of-sample predicted and actual next-day returns by supervised model, stock, date, and fold. |
 | `training_diagnostics.csv` | Per-epoch RL reward/loss diagnostics, stopping decisions, and GARL queue/sharing events. |
 | `tuning_parameters.csv` | Selected supervised parameters by stock and selected portfolio-level RL parameters by evaluation fold. |
 | `failures.csv` | Any failed baseline/fold/seed and its exception; header-only when no failures occur. |
@@ -257,6 +261,8 @@ results/<experiment-name>-<UTC-run-id>/
 | `report/cost_sensitivity.csv` | Replayed metrics for common 0/5/10/20/40-bps cost scenarios. |
 | `report/cost_sensitivity.png` | Sharpe degradation curves under those cost scenarios. |
 | `report/crash_period_cumulative_returns.png` | Optional net curves for the worst available buy-and-hold calendar year. |
+| `report/prediction_vs_actual_<supervised-baseline>.png` | Separate 21-day-smoothed portfolio-average forecast diagnostic for each supervised baseline. |
+| `report/trade_actions_<active-baseline>_<ticker>.png` | Separate close-price curve for each active baseline and stock, with upward buy/increase and downward sell/reduce triangles. |
 | `report/training_reward.png` | Mean training-reward trajectories by RL method. |
 | `report/training_loss.png` | Optimisation-loss trajectories for within-method convergence diagnosis. |
 | `report/training_summary.csv` | Epochs completed, stopping flags, and reward endpoints for every RL run. |

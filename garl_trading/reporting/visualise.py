@@ -8,6 +8,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
 import numpy as np
 import pandas as pd
 from scipy import stats
@@ -22,7 +23,7 @@ BASELINE_STYLES = {
     "random_forest": ("#009E73", "-", "", "xx"),
     "lstm": ("#E69F00", "-", "", "++"),
     "tcn": ("#A65628", "-", "", "oo"),
-    "tft": ("#CC79A7", "-", "", "OO"),
+    "transformer": ("#8C6BB1", "-", "", "o+"),
     "single_a2c": ("#332288", "-", "", "."),
     "single_ppo": ("#117733", "-", "", ".."),
     "single_dqn": ("#882255", "-", "", "**"),
@@ -56,17 +57,17 @@ def colour(name: str) -> str:
     return COLOURS.get(name, "#52616B")
 
 
-def _style(name: str) -> tuple[str, str, str, str]:
+def style(name: str) -> tuple[str, str, str, str]:
     return BASELINE_STYLES.get(name, DEFAULT_STYLE)
 
 
-def _ordered_baselines(values) -> list[str]:
+def ordered_baselines(values) -> list[str]:
     order = {name: number for number, name in enumerate(BASELINE_ORDER)}
     return sorted(set(values), key=lambda name: (order.get(name, len(order)), name))
 
 
-def _line_style(name: str, observations: int) -> dict:
-    line_colour, _, _, _ = _style(name)
+def line_style(name: str, observations: int) -> dict:
+    line_colour, _, _, _ = style(name)
     is_garl = name in {"garl_ddal", "selective_garl_ddal"}
     is_benchmark = name in {"buy_and_hold", "equal_weight_rebalanced"}
     return {
@@ -77,31 +78,36 @@ def _line_style(name: str, observations: int) -> dict:
     }
 
 
-def _apply_bar_styles(bars, names: list[str]) -> None:
+def apply_bar_styles(bars, names: list[str]) -> None:
     for bar, name in zip(bars, names, strict=True):
-        _, _, _, hatch = _style(name)
+        _, _, _, hatch = style(name)
         bar.set_hatch(hatch)
         bar.set_edgecolor("#222222")
         bar.set_linewidth(0.45)
 
 
-def _style_axis(axis: plt.Axes) -> None:
+def style_axis(axis: plt.Axes) -> None:
     axis.grid(alpha=0.18)
     axis.spines[["top", "right"]].set_visible(False)
 
 
-def _format_dates(axis: plt.Axes) -> None:
+def format_dates(axis: plt.Axes) -> None:
     locator = mdates.AutoDateLocator(minticks=4, maxticks=9)
     axis.xaxis.set_major_locator(locator)
     axis.xaxis.set_major_formatter(mdates.ConciseDateFormatter(locator))
 
 
-def _save(fig: plt.Figure, path: Path) -> None:
+def format_percent(axis: plt.Axes, which: str = "y") -> None:
+    formatter = mticker.PercentFormatter(xmax=1.0, decimals=1)
+    getattr(axis, f"{which}axis").set_major_formatter(formatter)
+
+
+def save(fig: plt.Figure, path: Path) -> None:
     fig.savefig(path, dpi=180, bbox_inches="tight")
     plt.close(fig)
 
 
-def _analysis_rows(metrics: pd.DataFrame) -> tuple[pd.DataFrame, str]:
+def analysis_rows(metrics: pd.DataFrame) -> tuple[pd.DataFrame, str]:
     if "fold_kind" in metrics and (metrics["fold_kind"] == "final_holdout").any():
         return metrics[metrics["fold_kind"] == "final_holdout"].copy(), "final_holdout"
     if {"fold", "repetition"}.issubset(metrics.columns):
@@ -112,7 +118,7 @@ def _analysis_rows(metrics: pd.DataFrame) -> tuple[pd.DataFrame, str]:
 
 
 def summary(metrics: pd.DataFrame, confidence: float) -> pd.DataFrame:
-    analysis, scope = _analysis_rows(metrics)
+    analysis, scope = analysis_rows(metrics)
     numeric = [column for column in SUMMARY_METRICS if column in analysis]
     rows = []
     for baseline, group in analysis.groupby("baseline", sort=False):
@@ -164,7 +170,7 @@ def plot_sharpe_ranking(report: pd.DataFrame, path: Path) -> None:
         color=[colour(name) for name in names],
         capsize=3,
     )
-    _apply_bar_styles(bars, names)
+    apply_bar_styles(bars, names)
     axis.set_yticks(y, names)
     axis.invert_yaxis()
     axis.axvline(0, color="#333333", linewidth=0.8)
@@ -177,14 +183,14 @@ def plot_sharpe_ranking(report: pd.DataFrame, path: Path) -> None:
     else:
         title = "Out-of-sample Sharpe ratio"
     axis.set_title(title)
-    _style_axis(axis)
-    _save(fig, path)
+    style_axis(axis)
+    save(fig, path)
 
 
 def plot_return_drawdown(report: pd.DataFrame, path: Path) -> None:
     fig, axis = plt.subplots(figsize=(9, 6), constrained_layout=True)
     for row in report.itertuples(index=False):
-        point_colour, _, _, _ = _style(row.baseline)
+        point_colour, _, _, _ = style(row.baseline)
         axis.scatter(
             abs(row.max_drawdown_mean),
             row.cagr_mean,
@@ -195,15 +201,17 @@ def plot_return_drawdown(report: pd.DataFrame, path: Path) -> None:
             linewidth=0.5,
             label=row.baseline,
         )
-    axis.set_xlabel("Absolute maximum drawdown")
-    axis.set_ylabel("CAGR")
+    axis.set_xlabel("Absolute maximum drawdown (%)")
+    axis.set_ylabel("CAGR (%)")
     axis.set_title("Out-of-sample return versus drawdown")
     axis.legend(fontsize=8, ncol=2)
-    _style_axis(axis)
-    _save(fig, path)
+    format_percent(axis, "x")
+    format_percent(axis, "y")
+    style_axis(axis)
+    save(fig, path)
 
 
-def _chosen_equity(equity: pd.DataFrame) -> tuple[pd.DataFrame, str]:
+def chosen_equity(equity: pd.DataFrame) -> tuple[pd.DataFrame, str]:
     if (equity["fold_kind"] == "final_holdout").any():
         chosen = equity[equity["fold_kind"] == "final_holdout"].copy()
         label = "final holdout"
@@ -218,13 +226,13 @@ def _chosen_equity(equity: pd.DataFrame) -> tuple[pd.DataFrame, str]:
 def plot_cumulative_returns(
     equity: pd.DataFrame, path: Path, *, exclude_benchmarks: bool = False
 ) -> None:
-    chosen, label = _chosen_equity(equity)
+    chosen, label = chosen_equity(equity)
     if exclude_benchmarks:
         chosen = chosen[
             ~chosen["baseline"].isin({"buy_and_hold", "equal_weight_rebalanced"})
         ]
     fig, axis = plt.subplots(figsize=(11, 6), constrained_layout=True)
-    for baseline in _ordered_baselines(chosen["baseline"]):
+    for baseline in ordered_baselines(chosen["baseline"]):
         group = chosen[chosen["baseline"] == baseline]
         curves = group.pivot_table(index="date", columns="repetition", values="equity")
         curves = curves.divide(curves.iloc[0])
@@ -233,16 +241,17 @@ def plot_cumulative_returns(
             cumulative.index,
             cumulative,
             label=baseline,
-            **_line_style(baseline, len(cumulative)),
+            **line_style(baseline, len(cumulative)),
         )
     axis.axhline(0, color="#333333", linewidth=0.8)
     axis.set_ylabel("Net cumulative return")
     prefix = "Active-strategy " if exclude_benchmarks else ""
     axis.set_title(f"{prefix}cumulative returns after transaction costs — {label}")
-    _format_dates(axis)
-    _style_axis(axis)
+    format_dates(axis)
+    format_percent(axis)
+    style_axis(axis)
     axis.legend(fontsize=8, ncol=2)
-    _save(fig, path)
+    save(fig, path)
 
 
 def plot_turnover(report: pd.DataFrame, path: Path) -> None:
@@ -250,13 +259,14 @@ def plot_turnover(report: pd.DataFrame, path: Path) -> None:
     fig, axis = plt.subplots(figsize=(10, max(5, 0.42 * len(names))), constrained_layout=True)
     y = np.arange(len(names))
     bars = axis.barh(y, report["turnover_daily_mean"], color=[colour(name) for name in names])
-    _apply_bar_styles(bars, names)
+    apply_bar_styles(bars, names)
     axis.set_yticks(y, names)
     axis.invert_yaxis()
-    axis.set_xlabel("Fraction of portfolio traded per day")
+    axis.set_xlabel("Portfolio traded per day (%)")
     axis.set_title("Average daily turnover")
-    _style_axis(axis)
-    _save(fig, path)
+    format_percent(axis, "x")
+    style_axis(axis)
+    save(fig, path)
 
 
 def plot_training_diagnostic(
@@ -266,20 +276,20 @@ def plot_training_diagnostic(
         return
     fig, axis = plt.subplots(figsize=(11, 6), constrained_layout=True)
     grouped = diagnostics.groupby(["baseline", "epoch"], as_index=False)[value].mean()
-    for baseline in _ordered_baselines(grouped["baseline"]):
+    for baseline in ordered_baselines(grouped["baseline"]):
         frame = grouped[grouped["baseline"] == baseline]
         axis.plot(
             frame["epoch"],
             frame[value],
             label=baseline,
-            **_line_style(baseline, len(frame)),
+            **line_style(baseline, len(frame)),
         )
     axis.set_xlabel("Training epoch")
     axis.set_ylabel(ylabel)
     axis.set_title(f"RL {ylabel.lower()} during training")
-    _style_axis(axis)
+    style_axis(axis)
     axis.legend(fontsize=8, ncol=2)
-    _save(fig, path)
+    save(fig, path)
 
 
 def training_summary(diagnostics: pd.DataFrame) -> pd.DataFrame:
@@ -316,7 +326,7 @@ def plot_fold_stability(metrics: pd.DataFrame, path: Path) -> pd.DataFrame:
             )
     axis.set_title("Sharpe ratio stability across walk-forward folds")
     fig.colorbar(image, ax=axis, label="Sharpe ratio")
-    _save(fig, path)
+    save(fig, path)
     return pivot
 
 
@@ -345,9 +355,9 @@ def plot_split_timeline(metrics: pd.DataFrame, path: Path) -> None:
     axis.set_yticks(np.arange(len(folds)), labels)
     axis.set_title("Purged walk-forward training and evaluation timeline")
     axis.set_xlabel("Date")
-    _format_dates(axis)
-    _style_axis(axis)
-    _save(fig, path)
+    format_dates(axis)
+    style_axis(axis)
+    save(fig, path)
 
 
 def sharpe_over_time_table(metrics: pd.DataFrame) -> pd.DataFrame:
@@ -372,15 +382,15 @@ def plot_sharpe_over_time(table: pd.DataFrame, path: Path) -> None:
             dates,
             table[baseline],
             label=baseline,
-            **_line_style(baseline, len(dates)),
+            **line_style(baseline, len(dates)),
         )
     axis.axhline(0, color="#333333", linewidth=0.8)
     axis.set_ylabel("Mean Sharpe ratio")
     axis.set_title("Sharpe ratios over successive out-of-sample periods")
-    _format_dates(axis)
-    _style_axis(axis)
+    format_dates(axis)
+    style_axis(axis)
     axis.legend(fontsize=8, ncol=2)
-    _save(fig, path)
+    save(fig, path)
 
 
 def plot_crash_period(daily: pd.DataFrame, path: Path) -> int | None:
@@ -401,7 +411,7 @@ def plot_crash_period(daily: pd.DataFrame, path: Path) -> int | None:
     crash_year = int(yearly.idxmin())
     crash = daily[daily["year"] == crash_year]
     fig, axis = plt.subplots(figsize=(11, 6), constrained_layout=True)
-    for baseline in _ordered_baselines(crash["baseline"]):
+    for baseline in ordered_baselines(crash["baseline"]):
         group = crash[crash["baseline"] == baseline]
         mean_return = group.pivot_table(
             index="date", columns="repetition", values="net_return"
@@ -411,16 +421,131 @@ def plot_crash_period(daily: pd.DataFrame, path: Path) -> int | None:
             cumulative.index,
             cumulative,
             label=baseline,
-            **_line_style(baseline, len(cumulative)),
+            **line_style(baseline, len(cumulative)),
         )
     axis.axhline(0, color="#333333", linewidth=0.8)
     axis.set_ylabel("Net cumulative return")
     axis.set_title(f"Cumulative returns during the worst buy-and-hold year ({crash_year})")
-    _format_dates(axis)
-    _style_axis(axis)
+    format_dates(axis)
+    format_percent(axis)
+    style_axis(axis)
     axis.legend(fontsize=8, ncol=2)
-    _save(fig, path)
+    save(fig, path)
     return crash_year
+
+
+def plot_prediction_vs_actual(predictions: pd.DataFrame, report_dir: Path) -> list[Path]:
+    """Create one final-evaluation forecast diagnostic per supervised baseline."""
+    if predictions.empty:
+        return []
+    chosen, label = chosen_equity(predictions)
+    paths = []
+    for baseline in ordered_baselines(chosen["baseline"]):
+        frame = chosen[chosen["baseline"] == baseline]
+        daily = frame.groupby("date")[["prediction", "actual_return"]].mean().sort_index()
+        smooth = daily.rolling(21, min_periods=5).mean()
+        fig, axis = plt.subplots(figsize=(11, 6), constrained_layout=True)
+        axis.plot(
+            smooth.index,
+            smooth["actual_return"],
+            color="#333333",
+            linewidth=1.8,
+            label="Actual next-day return",
+        )
+        axis.plot(
+            smooth.index,
+            smooth["prediction"],
+            label="Predicted next-day return",
+            **line_style(baseline, len(smooth)),
+        )
+        axis.axhline(0, color="#777777", linewidth=0.7)
+        axis.set_ylabel("Cross-stock mean return (%)")
+        axis.set_title(f"Prediction versus actual return — {baseline} ({label}, 21-day mean)")
+        format_dates(axis)
+        format_percent(axis)
+        style_axis(axis)
+        axis.legend(fontsize=9)
+        path = report_dir / f"prediction_vs_actual_{baseline}.png"
+        save(fig, path)
+        paths.append(path)
+    return paths
+
+
+def plot_trade_action_curves(
+    positions: pd.DataFrame, prices: pd.DataFrame, report_dir: Path
+) -> list[Path]:
+    """Plot close prices with buy/increase and sell/reduce target-position changes."""
+    if positions.empty or prices.empty:
+        return []
+    chosen, label = chosen_equity(positions)
+    chosen = chosen[
+        ~chosen["baseline"].isin({"buy_and_hold", "equal_weight_rebalanced"})
+    ]
+    closes = prices.pivot_table(
+        index="date", columns="ticker", values="close", aggfunc="last"
+    ).sort_index()
+    paths = []
+    for baseline in ordered_baselines(chosen["baseline"]):
+        frame = chosen[chosen["baseline"] == baseline]
+        matrix = frame.pivot_table(
+            index="date", columns="ticker", values="position", aggfunc="mean"
+        ).sort_index()
+        if matrix.empty:
+            continue
+        actions = matrix.diff()
+        actions.iloc[0] = matrix.iloc[0]
+        for ticker in matrix.columns:
+            if ticker not in closes:
+                continue
+            price = closes[ticker].reindex(matrix.index).dropna()
+            if price.empty:
+                continue
+            action = actions[ticker].reindex(price.index).fillna(0.0)
+            buy_dates = action.index[action > 1e-8]
+            sell_dates = action.index[action < -1e-8]
+
+            fig, axis = plt.subplots(figsize=(11, 6), constrained_layout=True)
+            axis.plot(
+                price.index,
+                price,
+                color="#334E68",
+                linewidth=1.7,
+                label="Close price",
+                zorder=2,
+            )
+            if len(buy_dates):
+                axis.scatter(
+                    buy_dates,
+                    price.loc[buy_dates],
+                    color="#009E73",
+                    marker="^",
+                    s=42,
+                    edgecolor="white",
+                    linewidth=0.35,
+                    label="Buy / increase",
+                    zorder=4,
+                )
+            if len(sell_dates):
+                axis.scatter(
+                    sell_dates,
+                    price.loc[sell_dates],
+                    color="#D55E00",
+                    marker="v",
+                    s=42,
+                    edgecolor="white",
+                    linewidth=0.35,
+                    label="Sell / reduce",
+                    zorder=4,
+                )
+            axis.set_ylabel("Close price")
+            axis.set_title(f"Buy/sell decisions — {baseline}, {ticker} ({label})")
+            format_dates(axis)
+            style_axis(axis)
+            axis.legend(fontsize=9)
+            path = report_dir / f"trade_actions_{baseline}_{ticker}.png"
+            save(fig, path)
+            paths.append(path)
+    return paths
 
 
 def cost_sensitivity(run_dir: Path, positions: pd.DataFrame, path: Path | None) -> pd.DataFrame:
@@ -469,22 +594,22 @@ def cost_sensitivity(run_dir: Path, positions: pd.DataFrame, path: Path | None) 
 
 def plot_cost_sensitivity(sensitivity: pd.DataFrame, path: Path) -> None:
     fig, axis = plt.subplots(figsize=(10, 6), constrained_layout=True)
-    for baseline in _ordered_baselines(sensitivity["baseline"]):
+    for baseline in ordered_baselines(sensitivity["baseline"]):
         group = sensitivity[sensitivity["baseline"] == baseline]
         curve = group.groupby("cost_bps")["sharpe"].mean()
         axis.plot(
             curve.index,
             curve.values,
             label=baseline,
-            **_line_style(baseline, len(curve)),
+            **line_style(baseline, len(curve)),
         )
     axis.axhline(0, color="#333333", linewidth=0.8)
     axis.set_title("Sharpe ratio under common trading-cost scenarios")
     axis.set_xlabel("Transaction cost and slippage (bps per unit turnover)")
     axis.set_ylabel("Mean out-of-sample Sharpe ratio")
-    _style_axis(axis)
+    style_axis(axis)
     axis.legend(fontsize=8, ncol=2)
-    _save(fig, path)
+    save(fig, path)
 
 
 def performance_table(report: pd.DataFrame) -> pd.DataFrame:
@@ -527,10 +652,17 @@ def build_report(
     metrics = pd.read_csv(run_dir / "metrics.csv")
     equity = pd.read_csv(run_dir / "equity.csv", parse_dates=["date"])
     positions = pd.read_csv(run_dir / "positions.csv", parse_dates=["date"])
+    prices = pd.read_csv(run_dir / "data" / "prices.csv", parse_dates=["date"])
     daily_path = run_dir / "daily_returns.csv"
     daily = pd.read_csv(daily_path, parse_dates=["date"]) if daily_path.exists() else pd.DataFrame()
     diagnostics_path = run_dir / "training_diagnostics.csv"
     diagnostics = pd.read_csv(diagnostics_path) if diagnostics_path.exists() else pd.DataFrame()
+    predictions_path = run_dir / "predictions.csv"
+    predictions = (
+        pd.read_csv(predictions_path, parse_dates=["date"])
+        if predictions_path.exists()
+        else pd.DataFrame()
+    )
 
     report = summary(metrics, confidence)
     comparison = performance_table(report)
@@ -578,6 +710,8 @@ def build_report(
         plot_split_timeline(metrics, report_dir / "data_split_timeline.png")
         plot_sharpe_over_time(sharpe_table, report_dir / "sharpe_over_time.png")
         crash_year = plot_crash_period(daily, report_dir / "crash_period_cumulative_returns.png")
+        plot_prediction_vs_actual(predictions, report_dir)
+        plot_trade_action_curves(positions, prices, report_dir)
         if not diagnostics.empty:
             plot_training_diagnostic(
                 diagnostics,
@@ -615,7 +749,10 @@ def build_report(
         "protocol; Sharpe ranking and fold paths address level and stability; net cumulative "
         "returns show economic magnitude; drawdown, turnover, and cost sensitivity cover risk "
         "and implementability. The active-only cumulative-return figure prevents the passive "
-        "benchmark from compressing differences among trading strategies.\n\n"
+        "benchmark from compressing differences among trading strategies. Prediction figures use "
+        "out-of-sample forecasts in return units. Each trade-action figure overlays target-position "
+        "changes on the corresponding stock-price curve; green upward triangles denote buy/increase "
+        "decisions and red downward triangles denote sell/reduce decisions.\n\n"
         f"{crash_note}\n"
     )
     if "md" in formats:

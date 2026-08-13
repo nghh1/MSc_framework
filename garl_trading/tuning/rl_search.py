@@ -18,6 +18,68 @@ from garl_trading.rl import (
 )
 
 
+def rl_candidate_profiles(name: str, learning_rate: float) -> list[dict[str, float | int]]:
+    """Nine predeclared, compute-bounded profiles for each RL algorithm family."""
+    rates = [learning_rate / 2, learning_rate, learning_rate * 2]
+    if name.endswith("a2c"):
+        entropy = [0.005, 0.01, 0.02]
+        return [
+            {
+                "learning_rate": rates[index % 3],
+                "entropy_weight": entropy[index // 3],
+                "turnover_penalty_multiplier": 1.0,
+            }
+            for index in range(9)
+        ]
+    if name.endswith("ppo"):
+        clipping = [0.1, 0.2, 0.3]
+        return [
+            {
+                "learning_rate": rates[index % 3],
+                "clip_epsilon": clipping[index // 3],
+                "turnover_penalty_multiplier": 1.0,
+            }
+            for index in range(9)
+        ]
+    if name.endswith("dqn"):
+        exploration = [0.3, 0.5, 0.7]
+        target_intervals = [5, 10, 20]
+        return [
+            {
+                "learning_rate": rates[index % 3],
+                "epsilon_decay_fraction": exploration[index // 3],
+                "target_update_interval": target_intervals[(index + index // 3) % 3],
+                "turnover_penalty_multiplier": 1.0,
+            }
+            for index in range(9)
+        ]
+    if name == "garl_ddal":
+        entropy = [0.005, 0.01, 0.02]
+        return [
+            {
+                "learning_rate": rates[index % 3],
+                "entropy_weight": entropy[index // 3],
+                "pool_size": 3,
+                "turnover_penalty_multiplier": 1.0,
+            }
+            for index in range(9)
+        ]
+    if name == "selective_garl_ddal":
+        thresholds = [0.0, 0.05, 0.1]
+        return [
+            {
+                "learning_rate": rates[index % 3],
+                "entropy_weight": 0.01,
+                "alignment_threshold": thresholds[index // 3],
+                "peer_mix": 0.5,
+                "pool_size": 3,
+                "turnover_penalty_multiplier": 1.0,
+            }
+            for index in range(9)
+        ]
+    raise KeyError(name)
+
+
 def tune_rl_policy(
     name: str,
     features: dict[str, pd.DataFrame],
@@ -43,6 +105,7 @@ def tune_rl_policy(
     garl_share_every: int,
     garl_pool_size: int,
     selective_garl_alignment_threshold: float,
+    selective_garl_peer_mix: float,
     encoder_channels: int = 32,
     encoder_kernel_size: int = 3,
     encoder_dilations: tuple[int, ...] = (1, 2, 4, 8),
@@ -78,12 +141,11 @@ def tune_rl_policy(
     context = {t: frame.iloc[context_positions] for t, frame in features.items()}
     tune_epochs = max(10, min(30, final_epochs // 5))
 
+    candidates = rl_candidate_profiles(name, learning_rate)
+
     def objective(trial: optuna.Trial) -> float:
-        params = {
-            "learning_rate": trial.suggest_float(
-                "learning_rate", learning_rate / 3, learning_rate * 3, log=True
-            )
-        }
+        profile = int(trial.suggest_categorical("profile", list(range(len(candidates)))))
+        params = candidates[profile]
         try:
             algorithm_parameters = {}
             if name in {"garl_ddal", "selective_garl_ddal"}:
@@ -96,6 +158,8 @@ def tune_rl_policy(
                     algorithm_parameters["alignment_threshold"] = (
                         selective_garl_alignment_threshold
                     )
+                    algorithm_parameters["peer_mix"] = selective_garl_peer_mix
+            algorithm_parameters.update(params)
             policy = trainer(
                 train_features,
                 train_closes,
@@ -116,7 +180,6 @@ def tune_rl_policy(
                 early_stopping_min_delta=early_stopping_min_delta,
                 minimum_train_epochs=min(minimum_train_epochs, tune_epochs),
                 **algorithm_parameters,
-                **params
             )
             positions = policy.positions(
                 validation_features,
@@ -136,12 +199,14 @@ def tune_rl_policy(
         except Exception:  # noqa: BLE001 - invalid trial configurations are penalised
             return -10.0
 
-    search_space = {
-        "learning_rate": np.geomspace(learning_rate / 3, learning_rate * 3, 9).tolist(),
-    }
+    search_space = {"profile": list(range(len(candidates)))}
     study = optuna.create_study(
         direction="maximize",
         sampler=optuna.samplers.GridSampler(search_space, seed=seed),
     )
-    study.optimize(objective, n_trials=min(trials, len(search_space["learning_rate"])), show_progress_bar=False)
-    return study.best_params
+    study.optimize(
+        objective,
+        n_trials=min(trials, len(search_space["profile"])),
+        show_progress_bar=False,
+    )
+    return dict(candidates[int(study.best_params["profile"])])

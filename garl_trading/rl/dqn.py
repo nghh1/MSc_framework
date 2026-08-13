@@ -141,8 +141,10 @@ def independent_update(
     dones = torch.tensor([item.done for item in batch], dtype=torch.float32, device=device)
     predicted = model(observations).gather(1, actions[:, None]).squeeze(1)
     with torch.no_grad():
-        expected = rewards + gamma * target(next_observations).max(axis=1).values * (1 - dones)
-    loss = nn.functional.mse_loss(predicted, expected)
+        next_actions = model(next_observations).argmax(axis=1, keepdim=True)
+        future = target(next_observations).gather(1, next_actions).squeeze(1)
+        expected = rewards + gamma * future * (1 - dones)
+    loss = nn.functional.smooth_l1_loss(predicted, expected)
     optimizer.zero_grad()
     loss.backward()
     nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -167,16 +169,21 @@ def train_independent_dqn(
     encoder_dilations: tuple[int, ...] = (1, 2, 4, 8),
     encoder_dropout: float = 0.0,
     epsilon_decay_fraction: float = 0.5,
+    target_update_interval: int = 10,
+    turnover_penalty_multiplier: float = 1.0,
     short_borrow_bps_annual: float = 0.0,
     early_stopping_patience: int = 15,
     early_stopping_min_delta: float = 1e-4,
     minimum_train_epochs: int = 30
 ) -> RLPolicySet:
+    if target_update_interval < 1:
+        raise ValueError("target_update_interval must be positive.")
     device = resolve_torch_device(device)
     tickers = tuple(features)
     scalers = fit_feature_scalers(features)
     states = make_states(
         features, closes, scalers, levels=levels, lookback=lookback, cost_rate=cost_rate,
+        turnover_penalty_multiplier=turnover_penalty_multiplier,
         short_borrow_bps_annual=short_borrow_bps_annual
     )
     observation_size = features[tickers[0]].shape[1] * lookback + 1
@@ -238,7 +245,7 @@ def train_independent_dqn(
                             gamma
                         )
                     )
-        if (epoch + 1) % 10 == 0:
+        if (epoch + 1) % target_update_interval == 0:
             for ticker in tickers:
                 targets[ticker].load_state_dict(models[ticker].state_dict())
         diagnostics.append(
@@ -291,16 +298,21 @@ def train_joint_dqn(
     encoder_dilations: tuple[int, ...] = (1, 2, 4, 8),
     encoder_dropout: float = 0.0,
     epsilon_decay_fraction: float = 0.5,
+    target_update_interval: int = 10,
+    turnover_penalty_multiplier: float = 1.0,
     short_borrow_bps_annual: float = 0.0,
     early_stopping_patience: int = 15,
     early_stopping_min_delta: float = 1e-4,
     minimum_train_epochs: int = 30
 ) -> RLPolicySet:
+    if target_update_interval < 1:
+        raise ValueError("target_update_interval must be positive.")
     device = resolve_torch_device(device)
     tickers = tuple(features)
     scalers = fit_feature_scalers(features)
     states = make_states(
         features, closes, scalers, levels=levels, lookback=lookback, cost_rate=cost_rate,
+        turnover_penalty_multiplier=turnover_penalty_multiplier,
         short_borrow_bps_annual=short_borrow_bps_annual,
     )
     per_asset_size = features[tickers[0]].shape[1] * lookback + 1
@@ -376,15 +388,16 @@ def train_joint_dqn(
                 )
                 predicted = model(observations).gather(2, action_tensor[..., None]).squeeze(-1)
                 with torch.no_grad():
-                    future = target(next_observations).max(axis=-1).values
+                    next_actions = model(next_observations).argmax(axis=-1, keepdim=True)
+                    future = target(next_observations).gather(2, next_actions).squeeze(-1)
                     expected = rewards_tensor[:, None] + gamma * future * (1 - done_tensor[:, None])
-                loss = nn.functional.mse_loss(predicted, expected)
+                loss = nn.functional.smooth_l1_loss(predicted, expected)
                 optimizer.zero_grad()
                 loss.backward()
                 nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 optimizer.step()
                 epoch_losses.append(float(loss.item()))
-        if (epoch + 1) % 10 == 0:
+        if (epoch + 1) % target_update_interval == 0:
             target.load_state_dict(model.state_dict())
         diagnostics.append(
             {

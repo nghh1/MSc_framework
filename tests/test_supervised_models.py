@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 from conftest import market_fixture
 
 from garl_trading.data import build_dataset
@@ -21,7 +22,7 @@ def test_all_supervised_models_fit_and_emit_finite_positions():
         "random_forest": {"n_estimators": 10, "min_samples_leaf": 2},
         "lstm": {"lookback": 5, "hidden": 16, "epochs": 1, "device": "cpu"},
         "tcn": {"lookback": 5, "hidden": 16, "epochs": 1, "device": "cpu"},
-        "tft": {"lookback": 5, "hidden": 16, "epochs": 1, "device": "cpu"},
+        "transformer": {"lookback": 5, "hidden": 16, "epochs": 1, "device": "cpu"},
     }
     for name, params in parameters.items():
         model = create_forecaster(name, seed=4, **params)
@@ -34,6 +35,16 @@ def test_all_supervised_models_fit_and_emit_finite_positions():
         assert len(positions) == len(test)
         assert np.isfinite(positions).all()
         assert positions.abs().max() <= 1
+
+
+def test_supervised_positions_follow_constrained_mean_variance_rule():
+    model = create_forecaster(
+        "random_forest", seed=4, n_estimators=1, risk_aversion=10.0
+    )
+    model.return_variance = 0.0004
+    predictions = pd.Series([0.001, -0.01, np.nan])
+    positions = model.positions_from_predictions(predictions)
+    assert np.allclose(positions, [0.25, -1.0, 0.0])
 
 
 def test_rolling_arimax_assimilates_observations_between_parameter_refits():

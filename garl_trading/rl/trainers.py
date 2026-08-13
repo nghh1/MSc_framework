@@ -75,6 +75,9 @@ def train_independent_a2c(
     encoder_kernel_size: int = 3,
     encoder_dilations: tuple[int, ...] = (1, 2, 4, 8),
     encoder_dropout: float = 0.0,
+    gae_lambda: float = 0.95,
+    entropy_weight: float = 0.01,
+    turnover_penalty_multiplier: float = 1.0,
     short_borrow_bps_annual: float = 0.0,
     early_stopping_patience: int = 15,
     early_stopping_min_delta: float = 1e-4,
@@ -85,6 +88,7 @@ def train_independent_a2c(
     scalers = fit_feature_scalers(features)
     states = make_states(
         features, closes, scalers, levels=levels, lookback=lookback, cost_rate=cost_rate,
+        turnover_penalty_multiplier=turnover_penalty_multiplier,
         short_borrow_bps_annual=short_borrow_bps_annual
     )
     observation_size = features[tickers[0]].shape[1] * lookback + 1
@@ -122,7 +126,9 @@ def train_independent_a2c(
                 states[ticker],
                 rollout_length=rollout_length,
                 gamma=gamma,
-                rng=randoms[ticker]
+                rng=randoms[ticker],
+                gae_lambda=gae_lambda,
+                entropy_weight=entropy_weight,
             )
             apply_gradient(models[ticker], optimizers[ticker], gradients)
             reward_history[ticker].append(reward)
@@ -178,6 +184,9 @@ def train_joint_a2c(
     encoder_kernel_size: int = 3,
     encoder_dilations: tuple[int, ...] = (1, 2, 4, 8),
     encoder_dropout: float = 0.0,
+    gae_lambda: float = 0.95,
+    entropy_weight: float = 0.01,
+    turnover_penalty_multiplier: float = 1.0,
     short_borrow_bps_annual: float = 0.0,
     early_stopping_patience: int = 15,
     early_stopping_min_delta: float = 1e-4,
@@ -188,6 +197,7 @@ def train_joint_a2c(
     scalers = fit_feature_scalers(features)
     states = make_states(
         features, closes, scalers, levels, lookback, cost_rate,
+        turnover_penalty_multiplier=turnover_penalty_multiplier,
         short_borrow_bps_annual=short_borrow_bps_annual
     )
     per_asset_size = features[tickers[0]].shape[1] * lookback + 1
@@ -211,11 +221,11 @@ def train_joint_a2c(
         early_stopping_patience, early_stopping_min_delta, minimum_train_epochs
     )
     for epoch in range(epochs):
-        obs_buffer, action_buffer, reward_buffer, done_buffer = [], [], [], []
+        obs_buffer, action_buffer, reward_buffer, value_buffer, done_buffer = [], [], [], [], []
         for _ in range(rollout_length):
             joint_obs = np.concatenate([observations[ticker] for ticker in tickers])
             with torch.no_grad():
-                logits, _ = model(torch.tensor(joint_obs, device=device).unsqueeze(0))
+                logits, value = model(torch.tensor(joint_obs, device=device).unsqueeze(0))
                 probabilities = torch.softmax(logits, dim=-1).squeeze(0).cpu().numpy()
             actions = [
                 int(rng.choice(len(levels), p=probabilities[i])) for i in range(len(tickers))
@@ -229,6 +239,7 @@ def train_joint_a2c(
             obs_buffer.append(joint_obs)
             action_buffer.append(actions)
             reward_buffer.append(float(np.mean(rewards)))
+            value_buffer.append(float(value.item()))
             done_buffer.append(any(dones))
 
         obs_tensor = torch.tensor(np.stack(obs_buffer), dtype=torch.float32, device=device)
@@ -237,20 +248,28 @@ def train_joint_a2c(
         with torch.no_grad():
             bootstrap_obs = np.concatenate([observations[ticker] for ticker in tickers])
             _, bootstrap = model(torch.tensor(bootstrap_obs, device=device).unsqueeze(0))
-        returns = np.zeros(len(reward_buffer), dtype=np.float32)
-        running = float(bootstrap.item())
-        for i in reversed(range(len(returns))):
-            running = reward_buffer[i] + gamma * running * (not done_buffer[i])
-            returns[i] = running
+        advantages = np.zeros(len(reward_buffer), dtype=np.float32)
+        running_advantage = 0.0
+        next_value = float(bootstrap.item())
+        for i in reversed(range(len(advantages))):
+            mask = 0.0 if done_buffer[i] else 1.0
+            following_value = next_value if i == len(advantages) - 1 else value_buffer[i + 1]
+            delta = reward_buffer[i] + gamma * following_value * mask - value_buffer[i]
+            running_advantage = delta + gamma * gae_lambda * mask * running_advantage
+            advantages[i] = running_advantage
+        returns = advantages + np.asarray(value_buffer, dtype=np.float32)
         return_tensor = torch.tensor(returns, device=device)
-        advantage = return_tensor - values
+        advantage = torch.tensor(advantages, device=device)
+        advantage = (advantage - advantage.mean()) / (
+            advantage.std(unbiased=False) + 1e-8
+        )
         log_probs = torch.log_softmax(logits, dim=-1)
         chosen = log_probs.gather(2, action_tensor[..., None]).squeeze(-1).sum(axis=1)
         entropy = -(torch.softmax(logits, dim=-1) * log_probs).sum(axis=-1).mean()
         loss = (
             -(chosen * advantage.detach()).mean()
             + 0.5 * nn.functional.mse_loss(values, return_tensor)
-            - 0.01 * entropy
+            - entropy_weight * entropy
         )
         optimizer.zero_grad()
         loss.backward()

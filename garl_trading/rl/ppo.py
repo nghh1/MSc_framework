@@ -123,6 +123,7 @@ def train_independent_ppo(
     encoder_dropout: float = 0.0,
     clip_epsilon: float = 0.2,
     gae_lambda: float = 0.95,
+    turnover_penalty_multiplier: float = 1.0,
     short_borrow_bps_annual: float = 0.0,
     early_stopping_patience: int = 15,
     early_stopping_min_delta: float = 1e-4,
@@ -133,6 +134,7 @@ def train_independent_ppo(
     scalers = fit_feature_scalers(features)
     states = make_states(
         features, closes, scalers, levels=levels, lookback=lookback, cost_rate=cost_rate,
+        turnover_penalty_multiplier=turnover_penalty_multiplier,
         short_borrow_bps_annual=short_borrow_bps_annual
     )
     models, optimizers, randoms = {}, {}, {}
@@ -219,6 +221,7 @@ def train_joint_ppo(
     encoder_dropout: float = 0.0,
     clip_epsilon: float = 0.2,
     gae_lambda: float = 0.95,
+    turnover_penalty_multiplier: float = 1.0,
     short_borrow_bps_annual: float = 0.0,
     early_stopping_patience: int = 15,
     early_stopping_min_delta: float = 1e-4,
@@ -229,6 +232,7 @@ def train_joint_ppo(
     scalers = fit_feature_scalers(features)
     states = make_states(
         features, closes, scalers, levels=levels, lookback=lookback, cost_rate=cost_rate,
+        turnover_penalty_multiplier=turnover_penalty_multiplier,
         short_borrow_bps_annual=short_borrow_bps_annual
     )
     per_asset_size = features[tickers[0]].shape[1] * lookback + 1

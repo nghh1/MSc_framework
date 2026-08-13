@@ -20,7 +20,7 @@ class PortfolioResult:
     metrics: dict[str, float]
 
 
-def _finish_result(
+def finish_result(
     initial_capital: float,
     net_returns: pd.Series,
     gross_returns: pd.Series,
@@ -108,7 +108,7 @@ def run_portfolio(
     cash = pd.Series(cash_values, index=closes.index, name="cash_exposure")
     turnover = pd.Series(turnover_values, index=closes.index, name="turnover")
     costs = pd.Series(cost_values, index=closes.index, name="cost")
-    return _finish_result(
+    return finish_result(
         initial_capital=initial_capital,
         net_returns=net,
         gross_returns=gross,
@@ -167,7 +167,7 @@ def run_buy_and_hold(
     cash = pd.Series(cash_values, index=closes.index, name="cash_exposure")
     turnover = pd.Series(turnover_values, index=closes.index, name="turnover")
     costs = pd.Series(cost_values, index=closes.index, name="cost")
-    return _finish_result(
+    return finish_result(
         initial_capital=initial_capital,
         net_returns=net,
         gross_returns=gross,
@@ -215,7 +215,7 @@ def run_equal_weight_rebalanced(
         cost_values.append(total_cost)
 
     held_weights = pd.DataFrame(weight_rows, index=closes.index, columns=closes.columns)
-    return _finish_result(
+    return finish_result(
         initial_capital=initial_capital,
         net_returns=pd.Series(net_values, index=closes.index, name="net_return"),
         gross_returns=pd.Series(gross_values, index=closes.index, name="gross_return"),

@@ -35,7 +35,7 @@ class StaticARIMAX(ForecastModel):
                 enforce_stationarity=False,
                 enforce_invertibility=False,
             ).fit()
-        self.set_signal_scale(y)
+        self.set_return_variance(y)
         return self
 
     def predict_returns(
@@ -77,7 +77,7 @@ class RollingARIMAX(ForecastModel):
         self.columns = list(features.columns)
         self.history_x = features.loc[valid, self.columns].tail(self.window).copy()
         self.history_y = targets.loc[valid].tail(self.window).copy()
-        self.set_signal_scale(self.history_y)
+        self.set_return_variance(self.history_y)
         return self
 
     def predict_returns(

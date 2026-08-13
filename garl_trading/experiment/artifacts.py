@@ -22,6 +22,7 @@ class ArtifactStore:
         self.positions: list[pd.DataFrame] = []
         self.equity: list[pd.DataFrame] = []
         self.daily_returns: list[pd.DataFrame] = []
+        self.predictions: list[pd.DataFrame] = []
         self.training_diagnostics: list[pd.DataFrame] = []
         self.tuning_parameters: list[dict] = []
         self.failures: list[dict] = []
@@ -40,7 +41,7 @@ class ArtifactStore:
         data_dir.mkdir(exist_ok=True)
         long_frames = []
         for ticker, frame in prices.items():
-            item = frame.reset_index()
+            item = frame.rename_axis("date").reset_index()
             item.insert(1, "ticker", ticker)
             long_frames.append(item)
         pd.concat(long_frames, ignore_index=True).to_csv(data_dir / "prices.csv", index=False)
@@ -86,6 +87,26 @@ class ArtifactStore:
     def add_failure(self, **values) -> None:
         self.failures.append(values)
 
+    def add_predictions(
+        self,
+        metadata: dict,
+        ticker: str,
+        predictions: pd.Series,
+        actual_returns: pd.Series,
+    ) -> None:
+        """Save out-of-sample forecasts in return units for diagnostic reporting."""
+        frame = pd.DataFrame(
+            {
+                "date": predictions.index,
+                "ticker": ticker,
+                "prediction": predictions.to_numpy(),
+                "actual_return": actual_returns.reindex(predictions.index).to_numpy(),
+            }
+        )
+        for key, value in metadata.items():
+            frame[key] = value
+        self.predictions.append(frame)
+
     def add_training_diagnostics(self, metadata: dict, diagnostics: list[dict]) -> None:
         if not diagnostics:
             return
@@ -122,6 +143,10 @@ class ArtifactStore:
         if self.daily_returns:
             pd.concat(self.daily_returns, ignore_index=True).to_csv(
                 self.path / "daily_returns.csv", index=False
+            )
+        if self.predictions:
+            pd.concat(self.predictions, ignore_index=True).to_csv(
+                self.path / "predictions.csv", index=False
             )
         if self.training_diagnostics:
             pd.concat(self.training_diagnostics, ignore_index=True).to_csv(

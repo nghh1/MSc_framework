@@ -51,7 +51,7 @@ class ModelsConfig:
         "random_forest",
         "lstm",
         "tcn",
-        "tft",
+        "transformer",
     )
     rl: tuple[str, ...] = (
         "single_a2c",
@@ -69,18 +69,21 @@ class ModelsConfig:
     rl_encoder_kernel_size: int = 3
     rl_encoder_dilations: tuple[int, ...] = (1, 2, 4, 8)
     rl_encoder_dropout: float = 0.0
+    supervised_risk_aversion: float = 10.0
     train_epochs: int = 100
     rollout_length: int = 32
     learning_rate: float = 3e-4
     gamma: float = 0.95
+    turnover_penalty_multiplier: float = 1.0
     # Zero disables checkpoint-based early stopping and keeps the final fixed-step model.
     early_stopping_patience: int = 0
     early_stopping_min_delta: float = 1e-4
     minimum_train_epochs: int = 30
     garl_share_after_fraction: float = 0.3
     garl_share_every: int = 2
-    garl_pool_size: int = 0
+    garl_pool_size: int = 3
     selective_garl_alignment_threshold: float = 0.0
+    selective_garl_peer_mix: float = 0.5
 
 
 @dataclass(frozen=True)
@@ -137,6 +140,10 @@ class FrameworkConfig:
             raise ValueError("rollout_length must be >= 2 and gamma must lie in (0, 1].")
         if self.models.learning_rate <= 0:
             raise ValueError("learning_rate must be positive.")
+        if self.models.supervised_risk_aversion <= 0:
+            raise ValueError("supervised_risk_aversion must be positive.")
+        if self.models.turnover_penalty_multiplier < 1:
+            raise ValueError("turnover_penalty_multiplier must be at least 1.")
         if self.models.early_stopping_patience < 0 or self.models.minimum_train_epochs < 1:
             raise ValueError(
                 "Early-stopping patience must be non-negative and minimum epochs positive."
@@ -149,6 +156,8 @@ class FrameworkConfig:
             raise ValueError("GARL sharing interval must be positive and pool size non-negative.")
         if not -1 <= self.models.selective_garl_alignment_threshold < 1:
             raise ValueError("Selective GARL alignment threshold must lie in [-1, 1).")
+        if not 0 <= self.models.selective_garl_peer_mix <= 1:
+            raise ValueError("Selective GARL peer mix must lie in [0, 1].")
         if any(
             value < 0
             for value in (

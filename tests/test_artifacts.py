@@ -22,13 +22,25 @@ def test_artifact_store_saves_config_and_market_snapshot(tmp_path):
         "ALL",
         {"learning_rate": 0.0003, "rollout_length": 32},
     )
+    dates = pd.bdate_range("2024-01-02", periods=2)
+    store.add_predictions(
+        {"baseline": "random_forest", "fold": 0, "fold_kind": "walk_forward"},
+        "AAA",
+        pd.Series([0.01, -0.02], index=dates),
+        pd.Series([0.02, -0.01], index=dates),
+    )
     store.flush()
     assert (store.path / "manifest.json").exists()
     assert (store.path / "config.toml").exists()
     assert (store.path / "data" / "prices.csv").exists()
+    prices = pd.read_csv(store.path / "data" / "prices.csv")
+    assert "date" in prices.columns
     tuning = pd.read_csv(store.path / "tuning_parameters.csv")
     assert set(tuning["parameter"]) == {"learning_rate", "rollout_length"}
     assert set(tuning["ticker"]) == {"ALL"}
+    predictions = pd.read_csv(store.path / "predictions.csv")
+    assert set(predictions.columns) >= {"prediction", "actual_return", "ticker"}
+    assert len(predictions) == 2
 
 
 def test_cuda_index_is_a_valid_configured_device():
@@ -45,4 +57,16 @@ def test_rl_tcn_receptive_field_must_cover_the_lookback():
         )
     )
     with pytest.raises(ValueError, match="receptive field"):
+        config.validate()
+
+
+def test_turnover_penalty_multiplier_cannot_understate_real_cost():
+    config = FrameworkConfig(models=ModelsConfig(turnover_penalty_multiplier=0.5))
+    with pytest.raises(ValueError, match="turnover_penalty_multiplier"):
+        config.validate()
+
+
+def test_supervised_risk_aversion_must_be_positive():
+    config = FrameworkConfig(models=ModelsConfig(supervised_risk_aversion=0.0))
+    with pytest.raises(ValueError, match="supervised_risk_aversion"):
         config.validate()

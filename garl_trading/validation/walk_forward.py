@@ -18,7 +18,7 @@ class Fold:
     kind: str = "walk_forward"
 
 
-def _make_fold(
+def make_fold(
     number: int,
     train: np.ndarray,
     test: np.ndarray,
@@ -65,7 +65,7 @@ def outer_folds(
         raise ValueError("Insufficient development data for requested folds.")
     boundaries = np.linspace(min_train_bars, development_n, n_folds + 1, dtype=int)
     folds = [
-        _make_fold(
+        make_fold(
             number=i,
             train=np.arange(0, boundaries[i]),
             test=np.arange(boundaries[i], boundaries[i + 1]),
@@ -78,7 +78,7 @@ def outer_folds(
     ]
     holdout = None
     if holdout_position < n:
-        holdout = _make_fold(
+        holdout = make_fold(
             number=n_folds,
             train=np.arange(0, holdout_position),
             test=np.arange(holdout_position, n),
@@ -107,7 +107,7 @@ def nested_folds(
         train = train_positions[: boundaries[i]]
         test = train_positions[boundaries[i] : boundaries[i + 1]]
         output.append(
-            _make_fold(
+            make_fold(
                 number=i,
                 train=train,
                 test=test,

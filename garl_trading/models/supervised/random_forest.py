@@ -30,7 +30,7 @@ class RandomForestForecaster(ForecastModel):
         valid = features.notna().all(axis=1) & targets.notna()
         self.columns = list(features.columns)
         self.model.fit(features.loc[valid, self.columns], targets.loc[valid])
-        self.set_signal_scale(targets.loc[valid])
+        self.set_return_variance(targets.loc[valid])
         return self
 
     def predict_returns(

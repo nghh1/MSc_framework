@@ -4,8 +4,8 @@ This repository is a clean-room reconstruction of an experimental framework for 
 Group-Agent Reinforcement Learning (GARL) with:
 
 - static and rolling ARIMAX;
-- Random Forest, LSTM, Temporal Convolutional Network (TCN), and a lightweight
-  Temporal Fusion Transformer (TFT);
+- Random Forest, a two-layer LSTM, a residual Temporal Convolutional Network (TCN),
+  and an encoder-only Transformer;
 - one joint agent controlling all stocks with A2C, PPO, or DQN;
 - independent per-stock agents using A2C, PPO, or DQN;
 - Group-Agent Reinforcement Learning (GARL) with deterministic DDAL-style gradient sharing;
@@ -20,13 +20,14 @@ restricted to the A2C-based DDAL mechanism so its comparison with independent A2
 isolates gradient sharing. PPO and DQN are additional non-GARL RL baselines; they are not
 presented as GARL variants.
 
-The original `garl_ddal` baseline is retained unchanged. `selective_garl_ddal` is a separately
-labelled post-hoc research extension motivated by negative transfer observed in the original run;
-it must not be described as Wu and Zeng's original algorithm.
+`garl_ddal` is an explicit DDAL adaptation with common-template agent initialisation, normalised GAE
+for its A2C learner, asynchronous recent-gradient exchange, and bounded peer integration.
+`selective_garl_ddal` is a separately labelled extension with receiver-side relevance and
+gradient-alignment gating; neither baseline is claimed as a bit-for-bit reproduction.
 
-TCN refers to **Temporal Convolutional Network**. TFT refers to **Temporal Fusion Transformer**;
-this repository uses a simplified compact TFT implementation
-with variable gating, recurrent encoding, causal attention, and a point-forecast head.
+The supervised sequence comparison isolates recurrent memory (LSTM), causal convolution (TCN),
+and positional self-attention (an encoder-only Transformer). All three use fixed 0.2 dropout;
+the RL TCN encoder remains at zero dropout so PPO likelihood ratios are well-defined.
 
 The primary research contract is **portfolio-to-portfolio comparison**. Every active method emits a
 target-position matrix with dates as rows and tickers as columns. Each stock controls a fixed
@@ -35,6 +36,10 @@ execution for one-bar delay, trading costs, slippage, and short-borrow costs.
 Uninvested cash has zero return. Buy-and-hold uses one initial equal-capital purchase and fixed
 shares; it is not silently rebalanced every day.
 
+Supervised return forecasts use one shared constrained mean-variance allocation rule:
+`clip(predicted_return / (10 * training_return_variance), -1, 1)`. The variance is training-only and
+the risk-aversion value is common across models and stocks rather than selected from test results.
+
 ## Design corrections built into this reconstruction
 
 - Feature warm-up rows are removed before fold boundaries are calculated.
@@ -42,8 +47,12 @@ shares; it is not silently rebalanced every day.
 - Every baseline receives the same portfolio capital and test dates.
 - Rolling ARIMAX uses the same causal online-update behavior during tuning and evaluation.
 - RL methods are evaluated across 10 repeated seeds.
-- GARL and independent A2C use the same reproducible per-stock initialisation contract: agents are
-  different from each other, while corresponding agents match across the direct ablation.
+- GARL and independent A2C use separate per-stock models copied from one reproducible parameter
+  template, preserving parameter correspondence while isolating sharing in the direct ablation.
+- A2C and GARL use normalised GAE with one unclipped update; PPO retains clipped repeated updates,
+  while DQN uses Double-DQN targets with Huber loss.
+- Nine compact inner-validation profiles cover family-specific stability settings and a uniform
+  one-or-two-times turnover training penalty; final backtests always charge actual costs once.
 - Every RL method uses the same causal 20-day TCN feature-extraction design; joint policies share the
   encoder across stocks, while GARL and independent A2C retain identical per-stock networks.
 - Buy-and-hold and daily equal-weight rebalancing are distinct benchmarks produced from the same
@@ -60,7 +69,7 @@ shares; it is not silently rebalanced every day.
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -e ".[dev]"
+pip install ".[dev]"
 
 # Real-data run
 garl-trading run --config configs/default.toml
@@ -91,6 +100,7 @@ results/<run-id>/
   positions.csv
   equity.csv
   daily_returns.csv
+  predictions.csv
   training_diagnostics.csv
   tuning_parameters.csv
   failures.csv
@@ -105,6 +115,8 @@ results/<run-id>/
     turnover.png
     cost_sensitivity.png
     crash_period_cumulative_returns.png
+    prediction_vs_actual_<supervised-baseline>.png
+    trade_actions_<active-baseline>_<ticker>.png
     training_reward.png
     training_loss.png
     training_summary.csv

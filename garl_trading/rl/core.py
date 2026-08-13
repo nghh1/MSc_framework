@@ -306,11 +306,25 @@ def initialise_asset_actor_critics(
     encoder_dilations: tuple[int, ...] = (1, 2, 4, 8),
     encoder_dropout: float = 0.0,
 ) -> dict[str, ActorCritic]:
-    """Create matched but independently initialised stock agents for GARL and its ablation."""
+    """Create separate stock agents from one common parameter template.
+
+    The common start preserves parameter correspondence for raw GARL gradient transfer.
+    Returned models remain independent objects with separate subsequent updates.
+    """
+    torch.manual_seed(seed)
+    template = ActorCritic(
+        observation_size,
+        actions,
+        lookback=lookback,
+        encoder_channels=encoder_channels,
+        encoder_kernel_size=encoder_kernel_size,
+        encoder_dilations=encoder_dilations,
+        encoder_dropout=encoder_dropout,
+    ).to(device)
+    template_state = template.state_dict()
     models = {}
-    for agent_number, ticker in enumerate(tickers):
-        torch.manual_seed(seed + agent_number)
-        models[ticker] = ActorCritic(
+    for ticker in tickers:
+        model = ActorCritic(
             observation_size,
             actions,
             lookback=lookback,
@@ -319,6 +333,8 @@ def initialise_asset_actor_critics(
             encoder_dilations=encoder_dilations,
             encoder_dropout=encoder_dropout,
         ).to(device)
+        model.load_state_dict(template_state)
+        models[ticker] = model
     return models
 
 
@@ -329,15 +345,18 @@ def make_states(
     levels: tuple[float, ...],
     lookback: int,
     cost_rate: float,
+    turnover_penalty_multiplier: float = 1.0,
     short_borrow_bps_annual: float = 0.0
 ) -> dict[str, TradingState]:
+    if turnover_penalty_multiplier < 1.0:
+        raise ValueError("turnover_penalty_multiplier must be at least 1.0.")
     return {
         ticker: TradingState.create(
             scalers[ticker].transform(frame).astype(np.float32),
             closes[ticker].reindex(frame.index).to_numpy(dtype=np.float32),
             np.asarray(levels, dtype=np.float32),
             lookback,
-            cost_rate,
+            cost_rate * turnover_penalty_multiplier,
             short_borrow_bps_annual / 10000 / 252
         )
         for ticker, frame in features.items()
@@ -350,43 +369,53 @@ def a2c_gradient(
     rollout_length: int,
     gamma: float,
     rng: np.random.Generator,
+    gae_lambda: float = 0.95,
     entropy_weight: float = 0.01,
     value_weight: float = 0.5,
 ) -> tuple[list[torch.Tensor], float, float]:
     device = next(model.parameters()).device
-    observations, actions, rewards, dones = [], [], [], []
+    observations, actions, rewards, rollout_values, dones = [], [], [], [], []
     observation = state.observation()
     for _ in range(rollout_length):
         with torch.no_grad():
-            logits, _ = model(torch.tensor(observation, device=device).unsqueeze(0))
+            logits, value = model(torch.tensor(observation, device=device).unsqueeze(0))
             probabilities = torch.softmax(logits, dim=-1).squeeze(0).cpu().numpy()
         action = int(rng.choice(len(probabilities), p=probabilities))
         next_observation, reward, done = state.step(action)
         observations.append(observation)
         actions.append(action)
         rewards.append(reward)
+        rollout_values.append(float(value.item()))
         dones.append(done)
         observation = state.reset() if done else next_observation
 
     obs_tensor = torch.tensor(np.stack(observations), dtype=torch.float32, device=device)
     action_tensor = torch.tensor(actions, dtype=torch.long, device=device)
-    logits, values = model(obs_tensor)
+    logits, predicted_values = model(obs_tensor)
     with torch.no_grad():
         _, bootstrap = model(torch.tensor(observation, device=device).unsqueeze(0))
-    returns = np.zeros(len(rewards), dtype=np.float32)
-    running = float(bootstrap.item())
+    advantages = np.zeros(len(rewards), dtype=np.float32)
+    running_advantage = 0.0
+    next_value = float(bootstrap.item())
     for i in reversed(range(len(rewards))):
-        running = rewards[i] + gamma * running * (not dones[i])
-        returns[i] = running
+        mask = 0.0 if dones[i] else 1.0
+        following_value = next_value if i == len(rewards) - 1 else rollout_values[i + 1]
+        delta = rewards[i] + gamma * following_value * mask - rollout_values[i]
+        running_advantage = delta + gamma * gae_lambda * mask * running_advantage
+        advantages[i] = running_advantage
+    returns = advantages + np.asarray(rollout_values, dtype=np.float32)
     return_tensor = torch.tensor(returns, device=device)
-    advantages = return_tensor - values
+    advantage_tensor = torch.tensor(advantages, device=device)
+    advantage_tensor = (advantage_tensor - advantage_tensor.mean()) / (
+        advantage_tensor.std(unbiased=False) + 1e-8
+    )
     log_probabilities = torch.log_softmax(logits, dim=-1)
     chosen = log_probabilities.gather(1, action_tensor[:, None]).squeeze(1)
     probabilities = torch.softmax(logits, dim=-1)
     entropy = -(probabilities * log_probabilities).sum(axis=1).mean()
     loss = (
-        -(chosen * advantages.detach()).mean()
-        + value_weight * nn.functional.mse_loss(values, return_tensor)
+        -(chosen * advantage_tensor).mean()
+        + value_weight * nn.functional.mse_loss(predicted_values, return_tensor)
         - entropy_weight * entropy
     )
     model.zero_grad()

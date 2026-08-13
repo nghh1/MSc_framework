@@ -167,6 +167,8 @@ class ExperimentRunner:
         )
         context_features, _ = self.frames(dataset, context_positions)
         position_columns = {}
+        prediction_columns = {}
+        metadata = self.metadata(name, fold, 0, cfg.experiment.seed)
         try:
             for ticker in dataset.tickers:
                 targets = dataset.features[ticker]["target_return"]
@@ -194,30 +196,38 @@ class ExperimentRunner:
                         transaction_cost_bps=cfg.execution.transaction_cost_bps,
                         slippage_bps=cfg.execution.slippage_bps,
                         short_borrow_bps_annual=cfg.execution.short_borrow_bps_annual,
+                        risk_aversion=cfg.models.supervised_risk_aversion,
                         objective_metric=cfg.tuning.objective,
                     )
                     store.add_tuning_parameters(
-                        self.metadata(name, fold, 0, cfg.experiment.seed),
+                        metadata,
                         ticker,
                         parameters,
                     )
-                if name in {"lstm", "tcn", "tft"}:
+                if name in {"lstm", "tcn", "transformer"}:
                     parameters.setdefault("lookback", cfg.models.lookback)
                     parameters.setdefault("device", cfg.models.device)
+                parameters.setdefault(
+                    "risk_aversion", cfg.models.supervised_risk_aversion
+                )
 
                 model = create_forecaster(name, seed=cfg.experiment.seed, **parameters)
                 model.fit(train_features[ticker], targets.iloc[fold.train])
                 context = ModelContext(context_features[ticker], targets.iloc[context_positions])
-                position_columns[ticker] = model.predict_positions(
+                predictions = model.predict_returns(
                     test_features[ticker],
                     context=context,
                     realised_targets=targets.iloc[fold.test],
                 )
+                position_columns[ticker] = model.positions_from_predictions(predictions)
+                prediction_columns[ticker] = (predictions, targets.iloc[fold.test])
             positions = pd.DataFrame(position_columns).reindex(dataset.index[fold.test])
             result = self.backtest(test_closes, positions)
+            for ticker, (predictions, actual_returns) in prediction_columns.items():
+                store.add_predictions(metadata, ticker, predictions, actual_returns)
             self.save_result(
                 store,
-                self.metadata(name, fold, 0, cfg.experiment.seed),
+                metadata,
                 positions,
                 result,
             )
@@ -240,6 +250,7 @@ class ExperimentRunner:
             "rollout_length": cfg.models.rollout_length,
             "learning_rate": cfg.models.learning_rate,
             "gamma": cfg.models.gamma,
+            "turnover_penalty_multiplier": cfg.models.turnover_penalty_multiplier,
             "cost_rate": (cfg.execution.transaction_cost_bps + cfg.execution.slippage_bps) / 10000,
             "seed": seed,
             "device": cfg.models.device,
@@ -283,6 +294,7 @@ class ExperimentRunner:
                         selective_garl_alignment_threshold=(
                             cfg.models.selective_garl_alignment_threshold
                         ),
+                        selective_garl_peer_mix=cfg.models.selective_garl_peer_mix,
                         encoder_channels=cfg.models.rl_encoder_channels,
                         encoder_kernel_size=cfg.models.rl_encoder_kernel_size,
                         encoder_dilations=cfg.models.rl_encoder_dilations,
@@ -310,23 +322,28 @@ class ExperimentRunner:
             elif name == "independent_dqn":
                 policy = train_independent_dqn(train_features, train_closes, **common)
             elif name == "garl_ddal":
+                garl_common = dict(common)
+                garl_common.setdefault("pool_size", cfg.models.garl_pool_size or None)
                 policy = train_garl_ddal(
                     train_features,
                     train_closes,
                     share_after_fraction=cfg.models.garl_share_after_fraction,
                     share_every=cfg.models.garl_share_every,
-                    pool_size=cfg.models.garl_pool_size or None,
-                    **common,
+                    **garl_common,
                 )
             elif name == "selective_garl_ddal":
+                garl_common = dict(common)
+                garl_common.setdefault("pool_size", cfg.models.garl_pool_size or None)
+                garl_common.setdefault(
+                    "alignment_threshold", cfg.models.selective_garl_alignment_threshold
+                )
+                garl_common.setdefault("peer_mix", cfg.models.selective_garl_peer_mix)
                 policy = train_selective_garl_ddal(
                     train_features,
                     train_closes,
                     share_after_fraction=cfg.models.garl_share_after_fraction,
                     share_every=cfg.models.garl_share_every,
-                    pool_size=cfg.models.garl_pool_size or None,
-                    alignment_threshold=cfg.models.selective_garl_alignment_threshold,
-                    **common,
+                    **garl_common,
                 )
             else:
                 raise KeyError(name)

@@ -13,6 +13,8 @@ from garl_trading.rl import (
     train_joint_ppo,
 )
 from garl_trading.rl.core import RewardEarlyStopper, TemporalFeatureExtractor
+from garl_trading.rl.dqn import Transition, independent_update
+from garl_trading.tuning.rl_search import rl_candidate_profiles
 
 
 def test_rl_temporal_extractor_is_causal_and_preserves_position_state():
@@ -154,3 +156,66 @@ def test_independent_a2c_retains_per_agent_training_diagnostics():
     )
 
     assert {row["agent"] for row in policy.diagnostics} == {"AAA", "BBB"}
+
+
+def test_double_dqn_uses_online_action_and_target_value_with_huber_loss():
+    class LookupQ(torch.nn.Module):
+        def __init__(self, values):
+            super().__init__()
+            self.values = torch.nn.Parameter(torch.tensor(values, dtype=torch.float32))
+
+        def forward(self, observation):
+            return self.values[observation[:, 0].long()]
+
+    online = LookupQ([[0.0, 0.0], [10.0, 0.0]])
+    target = LookupQ([[0.0, 0.0], [1.0, 100.0]])
+    optimizer = torch.optim.SGD(online.parameters(), lr=0.01)
+    batch = [
+        Transition(
+            np.array([0.0], dtype=np.float32),
+            0,
+            0.0,
+            np.array([1.0], dtype=np.float32),
+            False,
+        )
+    ]
+    loss = independent_update(online, target, optimizer, batch, gamma=1.0)
+    assert np.isclose(loss, 0.5)
+
+
+def test_rl_tuning_profiles_are_bounded_and_include_low_positive_selective_garl_gate():
+    for name in (
+        "single_a2c",
+        "single_ppo",
+        "single_dqn",
+        "independent_a2c",
+        "independent_ppo",
+        "independent_dqn",
+        "garl_ddal",
+        "selective_garl_ddal",
+    ):
+        profiles = rl_candidate_profiles(name, 3e-4)
+        assert len(profiles) == 9
+        assert {profile["turnover_penalty_multiplier"] for profile in profiles} == {1.0}
+    selective = rl_candidate_profiles("selective_garl_ddal", 3e-4)
+    garl = rl_candidate_profiles("garl_ddal", 3e-4)
+    assert {profile["pool_size"] for profile in garl + selective} == {3}
+    assert {profile["entropy_weight"] for profile in selective} == {0.01}
+    assert {
+        (profile["learning_rate"], profile["entropy_weight"])
+        for profile in garl
+    } == {
+        (rate, entropy)
+        for rate in (1.5e-4, 3e-4, 6e-4)
+        for entropy in (0.005, 0.01, 0.02)
+    }
+    assert {profile["alignment_threshold"] for profile in selective} == {0.0, 0.05, 0.1}
+    assert {profile["peer_mix"] for profile in selective} == {0.5}
+    assert {
+        (profile["learning_rate"], profile["alignment_threshold"])
+        for profile in selective
+    } == {
+        (rate, threshold)
+        for rate in (1.5e-4, 3e-4, 6e-4)
+        for threshold in (0.0, 0.05, 0.1)
+    }

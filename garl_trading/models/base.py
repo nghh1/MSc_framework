@@ -17,7 +17,8 @@ class ForecastModel(ABC):
     """Common contract for all supervised return forecasters."""
 
     def __init__(self) -> None:
-        self.signal_scale = 0.01
+        self.return_variance = 0.01**2
+        self.risk_aversion = 10.0
 
     @abstractmethod
     def fit(self, features: pd.DataFrame, targets: pd.Series) -> ForecastModel: ...
@@ -30,9 +31,11 @@ class ForecastModel(ABC):
         realised_targets: pd.Series | None = None,
     ) -> pd.Series: ...
 
-    def set_signal_scale(self, targets: pd.Series) -> None:
-        scale = float(targets.dropna().std())
-        self.signal_scale = scale if np.isfinite(scale) and scale > 1e-8 else 0.01
+    def set_return_variance(self, targets: pd.Series) -> None:
+        variance = float(targets.dropna().var(ddof=1))
+        self.return_variance = (
+            variance if np.isfinite(variance) and variance > 1e-10 else 0.01**2
+        )
 
     def predict_positions(
         self,
@@ -43,5 +46,9 @@ class ForecastModel(ABC):
         prediction = self.predict_returns(
             features, context=context, realised_targets=realised_targets
         )
-        position = np.tanh(prediction / (2.5 * self.signal_scale))
-        return pd.Series(position, index=features.index).fillna(0.0).clip(-1, 1)
+        return self.positions_from_predictions(prediction)
+
+    def positions_from_predictions(self, prediction: pd.Series) -> pd.Series:
+        """Map forecasts to constrained mean-variance positions using training variance."""
+        position = prediction / (self.risk_aversion * self.return_variance)
+        return pd.Series(position, index=prediction.index).fillna(0.0).clip(-1, 1)
