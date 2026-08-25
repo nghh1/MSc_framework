@@ -125,6 +125,8 @@ def train_independent_ppo(
     gae_lambda: float = 0.95,
     turnover_penalty_multiplier: float = 1.0,
     short_borrow_bps_annual: float = 0.0,
+    rebalance_threshold: float = 0.0,
+    decision_interval: int = 1,
     early_stopping_patience: int = 15,
     early_stopping_min_delta: float = 1e-4,
     minimum_train_epochs: int = 30
@@ -135,7 +137,9 @@ def train_independent_ppo(
     states = make_states(
         features, closes, scalers, levels=levels, lookback=lookback, cost_rate=cost_rate,
         turnover_penalty_multiplier=turnover_penalty_multiplier,
-        short_borrow_bps_annual=short_borrow_bps_annual
+        short_borrow_bps_annual=short_borrow_bps_annual,
+        rebalance_threshold=rebalance_threshold,
+        decision_interval=decision_interval,
     )
     models, optimizers, randoms = {}, {}, {}
     observation_size = features[tickers[0]].shape[1] * lookback + 1
@@ -165,7 +169,7 @@ def train_independent_ppo(
                     states[ticker],
                     optimizers[ticker],
                     rollout_length=rollout_length,
-                    gamma=gamma,
+                    gamma=gamma**decision_interval,
                     rng=randoms[ticker],
                     clip_epsilon=clip_epsilon,
                     gae_lambda=gae_lambda
@@ -199,7 +203,9 @@ def train_independent_ppo(
         lookback,
         cost_rate,
         short_borrow_bps_annual / 10000 / 252,
-        diagnostics
+        diagnostics,
+        rebalance_threshold,
+        decision_interval,
     )
 
 
@@ -223,6 +229,8 @@ def train_joint_ppo(
     gae_lambda: float = 0.95,
     turnover_penalty_multiplier: float = 1.0,
     short_borrow_bps_annual: float = 0.0,
+    rebalance_threshold: float = 0.0,
+    decision_interval: int = 1,
     early_stopping_patience: int = 15,
     early_stopping_min_delta: float = 1e-4,
     minimum_train_epochs: int = 30
@@ -233,7 +241,9 @@ def train_joint_ppo(
     states = make_states(
         features, closes, scalers, levels=levels, lookback=lookback, cost_rate=cost_rate,
         turnover_penalty_multiplier=turnover_penalty_multiplier,
-        short_borrow_bps_annual=short_borrow_bps_annual
+        short_borrow_bps_annual=short_borrow_bps_annual,
+        rebalance_threshold=rebalance_threshold,
+        decision_interval=decision_interval,
     )
     per_asset_size = features[tickers[0]].shape[1] * lookback + 1
     torch.manual_seed(seed)
@@ -288,7 +298,12 @@ def train_joint_ppo(
             bootstrap_observation = np.concatenate([current[ticker] for ticker in tickers])
             _, next_value = model(torch.tensor(bootstrap_observation, device=device).unsqueeze(0))
         advantages, returns = gae(
-            rewards, values, dones, float(next_value.item()), gamma, gae_lambda
+            rewards,
+            values,
+            dones,
+            float(next_value.item()),
+            gamma**decision_interval,
+            gae_lambda,
         )
         obs_tensor = torch.tensor(np.stack(observations), dtype=torch.float32, device=device)
         action_tensor = torch.tensor(actions, dtype=torch.long, device=device)
@@ -349,5 +364,7 @@ def train_joint_ppo(
         lookback,
         cost_rate,
         short_borrow_bps_annual / 10000 / 252,
-        diagnostics
+        diagnostics,
+        rebalance_threshold,
+        decision_interval,
     )

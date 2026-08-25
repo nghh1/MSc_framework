@@ -9,6 +9,20 @@ import torch
 from sklearn.preprocessing import StandardScaler
 from torch import nn
 
+from garl_trading.execution import (
+    bounded_exposure,
+    drifted_exposure,
+    limited_net_return,
+    thresholded_target,
+)
+
+
+def incremental_target(current: float, action: int, levels: np.ndarray) -> float:
+    """Interpret {-1, 0, +1} as decrease, hold, and increase."""
+    delta = float(levels[action])
+    proposed = float(np.clip(current + delta, levels.min(), levels.max()))
+    return float(levels[np.argmin(np.abs(levels - proposed))])
+
 
 class RewardEarlyStopper:
     def __init__(self, patience: int, min_delta: float, minimum_epochs: int):
@@ -239,8 +253,11 @@ class TradingState:
     lookback: int
     cost_rate: float
     short_borrow_rate: float
+    rebalance_threshold: float
+    decision_interval: int
     cursor: int
     position: float = 0.0
+    target_position: float = 0.0
 
     @classmethod
     def create(
@@ -250,7 +267,9 @@ class TradingState:
         levels: np.ndarray,
         lookback: int,
         cost_rate: float,
-        short_borrow_rate: float
+        short_borrow_rate: float,
+        rebalance_threshold: float = 0.0,
+        decision_interval: int = 1,
     ) -> TradingState:
         return cls(
             features,
@@ -259,21 +278,48 @@ class TradingState:
             lookback,
             cost_rate,
             short_borrow_rate,
+            rebalance_threshold,
+            decision_interval,
             lookback - 1
         )
 
     def observation(self) -> np.ndarray:
         window = self.features[self.cursor - self.lookback + 1 : self.cursor + 1]
-        return np.concatenate([window.reshape(-1), [self.position]]).astype(np.float32)
+        return np.concatenate([window.reshape(-1), [self.target_position]]).astype(np.float32)
 
     def step(self, action: int) -> tuple[np.ndarray, float, bool]:
-        target = float(self.levels[action])
-        next_return = self.closes[self.cursor + 1] / self.closes[self.cursor] - 1
-        turnover_cost = abs(target - self.position) * self.cost_rate
-        borrow_cost = max(-target, 0.0) * self.short_borrow_rate
-        reward = target * next_return - turnover_cost - borrow_cost
-        self.position = target * (1 + next_return) / max(1 + reward, 1e-8)
-        self.cursor += 1
+        desired = incremental_target(self.target_position, action, self.levels)
+        proposed = thresholded_target(desired, self.position, self.rebalance_threshold)
+        target = float(bounded_exposure(proposed))
+        initial_turnover_cost = abs(target - self.position) * self.cost_rate
+        exposure = target
+        wealth_factor = 1.0
+        end = min(self.cursor + self.decision_interval, len(self.closes) - 1)
+        for next_cursor in range(self.cursor + 1, end + 1):
+            held = float(bounded_exposure(exposure))
+            forced_turnover_cost = abs(held - exposure) * self.cost_rate
+            next_return = self.closes[next_cursor] / self.closes[next_cursor - 1] - 1
+            borrow_cost = max(-held, 0.0) * self.short_borrow_rate
+            net_return = held * next_return - borrow_cost - forced_turnover_cost
+            if next_cursor == self.cursor + 1:
+                net_return -= initial_turnover_cost
+            net_return = float(limited_net_return(net_return))
+            wealth_factor *= 1.0 + net_return
+            gross_return = held * next_return
+            exposure = (
+                float(drifted_exposure(held, next_return, gross_return))
+                if net_return > -1.0
+                else 0.0
+            )
+            if not np.isfinite(wealth_factor):
+                raise FloatingPointError("Non-finite wealth in RL transition.")
+            if wealth_factor <= 0:
+                exposure = 0.0
+                break
+        reward = wealth_factor - 1.0
+        self.position = float(exposure)
+        self.target_position = desired
+        self.cursor = end
         done = self.cursor >= len(self.closes) - 1
         if done:
             return (
@@ -286,6 +332,7 @@ class TradingState:
     def reset(self) -> np.ndarray:
         self.cursor = self.lookback - 1
         self.position = 0.0
+        self.target_position = 0.0
         return self.observation()
 
 
@@ -346,7 +393,9 @@ def make_states(
     lookback: int,
     cost_rate: float,
     turnover_penalty_multiplier: float = 1.0,
-    short_borrow_bps_annual: float = 0.0
+    short_borrow_bps_annual: float = 0.0,
+    rebalance_threshold: float = 0.0,
+    decision_interval: int = 1,
 ) -> dict[str, TradingState]:
     if turnover_penalty_multiplier < 1.0:
         raise ValueError("turnover_penalty_multiplier must be at least 1.0.")
@@ -357,7 +406,9 @@ def make_states(
             np.asarray(levels, dtype=np.float32),
             lookback,
             cost_rate * turnover_penalty_multiplier,
-            short_borrow_bps_annual / 10000 / 252
+            short_borrow_bps_annual / 10000 / 252,
+            rebalance_threshold,
+            decision_interval,
         )
         for ticker, frame in features.items()
     }
@@ -449,7 +500,9 @@ def greedy_asset_positions(
     lookback: int,
     closes: pd.Series | None = None,
     cost_rate: float = 0.0,
-    short_borrow_rate: float = 0.0
+    short_borrow_rate: float = 0.0,
+    rebalance_threshold: float = 0.0,
+    decision_interval: int = 1,
 ) -> pd.Series:
     model.eval()
     device = next(model.parameters()).device
@@ -457,7 +510,7 @@ def greedy_asset_positions(
     combined = combined.loc[~combined.index.duplicated(keep="last")].sort_index()
     values = scaler.transform(combined).astype(np.float32)
     location = {date: i for i, date in enumerate(combined.index)}
-    current = 0.0
+    current_target = 0.0
     output = {}
     dates = list(features.index)
     closes = closes.reindex(features.index) if closes is not None else None
@@ -467,18 +520,15 @@ def greedy_asset_positions(
         window = values[start : i + 1]
         if len(window) < lookback:
             window = np.concatenate([np.repeat(window[:1], lookback - len(window), axis=0), window])
-        observation = np.concatenate([window.reshape(-1), [current]]).astype(np.float32)
-        network_output = model(torch.tensor(observation, device=device).unsqueeze(0))
-        logits = network_output[0] if isinstance(network_output, tuple) else network_output
-        action = int(torch.argmax(logits, dim=-1).item())
-        current = float(levels[action])
-        output[date] = current
-        if closes is not None and step + 1 < len(dates):
-            next_return = float(closes.iloc[step + 1] / closes.iloc[step] - 1)
-            reward = (
-                current * next_return
-                - abs(current - observation[-1]) * cost_rate
-                - max(-current, 0.0) * short_borrow_rate
+        if step % decision_interval == 0:
+            observation = np.concatenate([window.reshape(-1), [current_target]]).astype(
+                np.float32
             )
-            current = current * (1 + next_return) / max(1 + reward, 1e-8)
+            network_output = model(torch.tensor(observation, device=device).unsqueeze(0))
+            logits = network_output[0] if isinstance(network_output, tuple) else network_output
+            action = int(torch.argmax(logits, dim=-1).item())
+            current_target = incremental_target(
+                current_target, action, np.asarray(levels, dtype=float)
+            )
+        output[date] = current_target
     return pd.Series(output)

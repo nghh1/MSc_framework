@@ -40,7 +40,7 @@ class ExperimentRunner:
         raw = load_market_data(
             tickers, cfg.data.start, cfg.data.end, adjust_prices=cfg.data.adjust_prices
         )
-        dataset = build_dataset(raw)
+        dataset = build_dataset(raw, horizon=cfg.data.target_horizon)
         min_train = min(cfg.validation.min_train_bars, max(252, len(dataset.index) // 3))
         folds, holdout = outer_folds(
             dataset.index,
@@ -99,6 +99,8 @@ class ExperimentRunner:
             transaction_cost_bps=cfg.transaction_cost_bps,
             slippage_bps=cfg.slippage_bps,
             short_borrow_bps_annual=cfg.short_borrow_bps_annual,
+            rebalance_threshold=cfg.rebalance_threshold,
+            decision_interval=cfg.decision_interval,
         )
 
     def metadata(self, name, fold, repetition, seed):
@@ -125,6 +127,7 @@ class ExperimentRunner:
             costs=result.costs,
             turnover=result.turnover,
             cash_exposure=result.cash_exposure,
+            trades=result.trades,
         )
 
     def run_benchmarks(self, dataset, fold, store):
@@ -196,6 +199,9 @@ class ExperimentRunner:
                         transaction_cost_bps=cfg.execution.transaction_cost_bps,
                         slippage_bps=cfg.execution.slippage_bps,
                         short_borrow_bps_annual=cfg.execution.short_borrow_bps_annual,
+                        rebalance_threshold=cfg.execution.rebalance_threshold,
+                        decision_interval=cfg.execution.decision_interval,
+                        target_horizon=cfg.data.target_horizon,
                         risk_aversion=cfg.models.supervised_risk_aversion,
                         objective_metric=cfg.tuning.objective,
                     )
@@ -213,7 +219,11 @@ class ExperimentRunner:
 
                 model = create_forecaster(name, seed=cfg.experiment.seed, **parameters)
                 model.fit(train_features[ticker], targets.iloc[fold.train])
-                context = ModelContext(context_features[ticker], targets.iloc[context_positions])
+                context = ModelContext(
+                    context_features[ticker],
+                    targets.iloc[context_positions],
+                    target_horizon=cfg.data.target_horizon,
+                )
                 predictions = model.predict_returns(
                     test_features[ticker],
                     context=context,
@@ -259,6 +269,8 @@ class ExperimentRunner:
             "encoder_dilations": cfg.models.rl_encoder_dilations,
             "encoder_dropout": cfg.models.rl_encoder_dropout,
             "short_borrow_bps_annual": cfg.execution.short_borrow_bps_annual,
+            "rebalance_threshold": cfg.execution.rebalance_threshold,
+            "decision_interval": cfg.execution.decision_interval,
             "early_stopping_patience": cfg.models.early_stopping_patience,
             "early_stopping_min_delta": cfg.models.early_stopping_min_delta,
             "minimum_train_epochs": cfg.models.minimum_train_epochs,
@@ -284,6 +296,8 @@ class ExperimentRunner:
                         transaction_cost_bps=cfg.execution.transaction_cost_bps,
                         slippage_bps=cfg.execution.slippage_bps,
                         short_borrow_bps_annual=cfg.execution.short_borrow_bps_annual,
+                        rebalance_threshold=cfg.execution.rebalance_threshold,
+                        decision_interval=cfg.execution.decision_interval,
                         embargo_bars=cfg.validation.embargo_bars,
                         early_stopping_patience=cfg.models.early_stopping_patience,
                         early_stopping_min_delta=cfg.models.early_stopping_min_delta,

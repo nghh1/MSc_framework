@@ -69,3 +69,29 @@ def test_rolling_arimax_assimilates_observations_between_parameter_refits():
 
     assert np.isclose(low_forecast.iloc[0], high_forecast.iloc[0])
     assert not np.isclose(low_forecast.iloc[1], high_forecast.iloc[1])
+
+
+def test_rolling_arimax_delays_five_day_target_assimilation():
+    dataset = build_dataset(market_fixture(("AAA",), periods=340, seed=11), horizon=5)
+    features = dataset.features["AAA"].loc[:, FEATURE_COLUMNS]
+    targets = dataset.features["AAA"]["target_return"]
+    train = np.arange(0, 90)
+    context_positions = np.arange(90, 109)
+    test = np.arange(109, 116)
+    context = ModelContext(
+        features.iloc[context_positions],
+        targets.iloc[context_positions],
+        target_horizon=5,
+    )
+    model = RollingARIMAX(p=1, d=0, q=0, trend="n", window=90, refit_every=20)
+    model.fit(features.iloc[train], targets.iloc[train])
+
+    low = targets.iloc[test].copy()
+    high = targets.iloc[test].copy()
+    low.iloc[0] = -0.25
+    high.iloc[0] = 0.25
+    low_forecast = model.predict_returns(features.iloc[test], context=context, realised_targets=low)
+    high_forecast = model.predict_returns(features.iloc[test], context=context, realised_targets=high)
+
+    assert np.allclose(low_forecast.iloc[:5], high_forecast.iloc[:5])
+    assert not np.isclose(low_forecast.iloc[5], high_forecast.iloc[5])

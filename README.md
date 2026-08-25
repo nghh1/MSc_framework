@@ -30,13 +30,16 @@ and positional self-attention (an encoder-only Transformer). All three use fixed
 the RL TCN encoder remains at zero dropout so PPO likelihood ratios are well-defined.
 
 The primary research contract is **portfolio-to-portfolio comparison**. Every active method emits a
-target-position matrix with dates as rows and tickers as columns. Each stock controls a fixed
-equal-capital sleeve, and the same drift-aware sleeve transition is used by RL training and final
-execution for one-bar delay, trading costs, slippage, and short-borrow costs.
+target-position matrix with dates as rows and tickers as columns. Active decisions occur every five
+trading days, with one-bar execution delay and fixed-share holding between decisions. A mandatory
+daily exposure check covers a short position back to `-1` if price drift would breach the common
+`[-1, 1]` limit; this forced adjustment is recorded and charged as a trade. Each stock
+controls a fixed equal-capital sleeve, and RL training and final execution share the same compounded
+five-day transition, trading costs, slippage, and short-borrow costs.
 Uninvested cash has zero return. Buy-and-hold uses one initial equal-capital purchase and fixed
 shares; it is not silently rebalanced every day.
 
-Supervised return forecasts use one shared constrained mean-variance allocation rule:
+Supervised models forecast five-day returns and use one shared constrained mean-variance allocation rule:
 `clip(predicted_return / (10 * training_return_variance), -1, 1)`. The variance is training-only and
 the risk-aversion value is common across models and stocks rather than selected from test results.
 
@@ -51,8 +54,9 @@ the risk-aversion value is common across models and stocks rather than selected 
   template, preserving parameter correspondence while isolating sharing in the direct ablation.
 - A2C and GARL use normalised GAE with one unclipped update; PPO retains clipped repeated updates,
   while DQN uses Double-DQN targets with Huber loss.
-- Nine compact inner-validation profiles cover family-specific stability settings and a uniform
-  one-or-two-times turnover training penalty; final backtests always charge actual costs once.
+- Nine compact inner-validation profiles cover family-specific stability settings. RL training uses
+  a fixed two-times turnover regulariser; final backtests always charge actual costs once.
+- RL actions are incremental decrease, hold, and increase decisions over `{-1, 0, +1}` positions.
 - Every RL method uses the same causal 20-day TCN feature-extraction design; joint policies share the
   encoder across stocks, while GARL and independent A2C retain identical per-stock networks.
 - Buy-and-hold and daily equal-weight rebalancing are distinct benchmarks produced from the same
@@ -60,16 +64,16 @@ the risk-aversion value is common across models and stocks rather than selected 
 - ADX(14) and ROC(20) extend the causal indicators without duplicating the existing ROC(10), which
   is already represented by `ret_10`.
 - RL training reward/loss diagnostics are retained with the fixed-step results.
-- Results, daily net/gross returns, costs, positions, equity curves, configuration, and
+- Results, daily net/gross returns, costs, positions, executed trades, equity curves, configuration, and
   the downloaded data snapshots are written to `results/`.
 - Reporting is independent from training and consumes tidy artifact tables.
 
 ## Quick start
 
 ```bash
-python -m venv .venv
+# Create/update the environment, refresh the installed local package, and run tests.
+./scripts/setup_env.sh
 source .venv/bin/activate
-pip install ".[dev]"
 
 # Real-data run
 garl-trading run --config configs/default.toml
@@ -77,8 +81,11 @@ garl-trading run --config configs/default.toml
 # Build the report again from an existing run
 garl-trading report --run-dir results/<run-id>
 
-pytest
+python -m pytest
 ```
+
+Run the setup script again after code or TOML-schema changes. It force-refreshes the package inside
+`.venv`, preventing `garl-trading` from retaining an older source copy in `site-packages`.
 
 See [the model rationale](docs/MODEL_RATIONALE.md),
 [reporting rationale](docs/REPORTING_RATIONALE.md), and [full runbook](docs/RUNBOOK.md) before the
@@ -100,26 +107,28 @@ results/<run-id>/
   positions.csv
   equity.csv
   daily_returns.csv
+  trades.csv
   predictions.csv
   training_diagnostics.csv
   tuning_parameters.csv
   failures.csv
   report/
     data_split_timeline.png
-    cumulative_returns_net.png
-    active_cumulative_returns_net.png
+    cumulative_returns_<family>.png
     sharpe_ranking.png
-    sharpe_over_time.png
+    sharpe_over_time_<family>.png
     fold_stability.png
     return_vs_drawdown.png
     turnover.png
-    cost_sensitivity.png
-    crash_period_cumulative_returns.png
+    cost_sensitivity_<family>.png
+    crash_period_cumulative_returns_<family>.png
     prediction_vs_actual_<supervised-baseline>.png
     trade_actions_<active-baseline>_<ticker>.png
     training_reward.png
     training_loss.png
     training_summary.csv
+    trade_timing_summary.csv
+    trade_timing_summary.md
     performance_comparison.csv
     performance_comparison.md
     sharpe_over_time.csv

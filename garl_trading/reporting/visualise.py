@@ -11,31 +11,67 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import numpy as np
 import pandas as pd
+from matplotlib.patches import Patch
 from scipy import stats
 
 from garl_trading.backtest import run_buy_and_hold, run_equal_weight_rebalanced, run_portfolio
 
 BASELINE_STYLES = {
     "buy_and_hold": ("#000000", "-", "", ""),
-    "equal_weight_rebalanced": ("#7F7F7F", "-", "", "//"),
-    "arimax_static": ("#0072B2", "-", "", "/"),
-    "arimax_rolling": ("#56B4E9", "-", "", "\\"),
-    "random_forest": ("#009E73", "-", "", "xx"),
-    "lstm": ("#E69F00", "-", "", "++"),
-    "tcn": ("#A65628", "-", "", "oo"),
-    "transformer": ("#8C6BB1", "-", "", "o+"),
-    "single_a2c": ("#332288", "-", "", "."),
-    "single_ppo": ("#117733", "-", "", ".."),
-    "single_dqn": ("#882255", "-", "", "**"),
-    "independent_a2c": ("#88CCEE", "-", "", "///"),
-    "independent_ppo": ("#44AA99", "-", "", "\\\\"),
-    "independent_dqn": ("#AA4499", "-", "", "xxx"),
-    "garl_ddal": ("#E41A1C", "-", "", "+++"),
-    "selective_garl_ddal": ("#6A3D9A", "-", "", "\\\\++"),
+    "equal_weight_rebalanced": ("#7F7F7F", "-", "", ""),
+    "arimax_static": ("#0072B2", "-", "", ""),
+    "arimax_rolling": ("#56B4E9", "-", "", ""),
+    "random_forest": ("#009E73", "-", "", ""),
+    "lstm": ("#E69F00", "-", "", ""),
+    "tcn": ("#A65628", "-", "", ""),
+    "transformer": ("#8C6BB1", "-", "", ""),
+    "single_a2c": ("#332288", "-", "", ""),
+    "single_ppo": ("#117733", "-", "", ""),
+    "single_dqn": ("#882255", "-", "", ""),
+    "independent_a2c": ("#88CCEE", "-", "", ""),
+    "independent_ppo": ("#44AA99", "-", "", ""),
+    "independent_dqn": ("#AA4499", "-", "", ""),
+    "garl_ddal": ("#E41A1C", "-", "", ""),
+    "selective_garl_ddal": ("#6A3D9A", "-", "", ""),
 }
 BASELINE_ORDER = tuple(BASELINE_STYLES)
 COLOURS = {name: values[0] for name, values in BASELINE_STYLES.items()}
 DEFAULT_STYLE = ("#52616B", "-", "", "")
+BASELINE_LABELS = {
+    "buy_and_hold": "Equal-weight buy-and-hold",
+    "equal_weight_rebalanced": "Daily equal-weight rebalancing",
+    "arimax_static": "Static ARIMAX",
+    "arimax_rolling": "Rolling ARIMAX",
+    "random_forest": "Random Forest",
+    "lstm": "LSTM",
+    "tcn": "TCN",
+    "transformer": "Transformer",
+    "single_a2c": "Joint A2C",
+    "single_ppo": "Joint PPO",
+    "single_dqn": "Joint DDQN",
+    "independent_a2c": "Independent A2C",
+    "independent_ppo": "Independent PPO",
+    "independent_dqn": "Independent DDQN",
+    "garl_ddal": "GARL-DDAL",
+    "selective_garl_ddal": "Selective GARL-DDAL",
+}
+PASSIVE_BASELINES = ("buy_and_hold", "equal_weight_rebalanced")
+BASELINE_FAMILIES = {
+    "passive": PASSIVE_BASELINES,
+    "statistical": ("arimax_static", "arimax_rolling"),
+    "supervised_learning": ("random_forest", "lstm", "tcn", "transformer"),
+    "joint_rl": ("single_a2c", "single_ppo", "single_dqn"),
+    "independent_rl": ("independent_a2c", "independent_ppo", "independent_dqn"),
+    "group_agent_rl": ("garl_ddal", "selective_garl_ddal"),
+}
+FAMILY_TITLES = {
+    "passive": "Passive allocation",
+    "statistical": "Statistical forecasting",
+    "supervised_learning": "Supervised and deep sequence learning",
+    "joint_rl": "Joint reinforcement learning",
+    "independent_rl": "Independent reinforcement learning",
+    "group_agent_rl": "Group-agent reinforcement learning",
+}
 
 SUMMARY_METRICS = [
     "total_return",
@@ -57,6 +93,11 @@ def colour(name: str) -> str:
     return COLOURS.get(name, "#52616B")
 
 
+def display_label(name: str) -> str:
+    """Return a publication-facing label without changing stored identifiers."""
+    return BASELINE_LABELS.get(name, name.replace("_", " ").title())
+
+
 def style(name: str) -> tuple[str, str, str, str]:
     return BASELINE_STYLES.get(name, DEFAULT_STYLE)
 
@@ -64,6 +105,16 @@ def style(name: str) -> tuple[str, str, str, str]:
 def ordered_baselines(values) -> list[str]:
     order = {name: number for number, name in enumerate(BASELINE_ORDER)}
     return sorted(set(values), key=lambda name: (order.get(name, len(order)), name))
+
+
+def family_selection(values, family: str, *, passive_reference: bool = True) -> list[str]:
+    available = set(values)
+    members = [name for name in BASELINE_FAMILIES[family] if name in available]
+    if not members:
+        return []
+    if family != "passive" and passive_reference:
+        members = [name for name in PASSIVE_BASELINES if name in available] + members
+    return ordered_baselines(members)
 
 
 def line_style(name: str, observations: int) -> dict:
@@ -79,9 +130,7 @@ def line_style(name: str, observations: int) -> dict:
 
 
 def apply_bar_styles(bars, names: list[str]) -> None:
-    for bar, name in zip(bars, names, strict=True):
-        _, _, _, hatch = style(name)
-        bar.set_hatch(hatch)
+    for bar, _ in zip(bars, names, strict=True):
         bar.set_edgecolor("#222222")
         bar.set_linewidth(0.45)
 
@@ -171,13 +220,16 @@ def plot_sharpe_ranking(report: pd.DataFrame, path: Path) -> None:
         capsize=3,
     )
     apply_bar_styles(bars, names)
-    axis.set_yticks(y, names)
+    axis.set_yticks(y, [display_label(name) for name in names])
     axis.invert_yaxis()
     axis.axvline(0, color="#333333", linewidth=0.8)
     axis.set_xlabel("Annualised Sharpe ratio")
     bases = set(report.get("interval_basis", pd.Series(dtype=str)).dropna())
     if "training_seed" in bases:
-        title = "Out-of-sample Sharpe ratio (interval across training seeds)"
+        title = (
+            "Final-holdout Sharpe ratio\n"
+            "Error bars: 95% intervals across repeated RL training seeds"
+        )
     elif "walk_forward_fold" in bases:
         title = "Out-of-sample Sharpe ratio (interval across test folds)"
     else:
@@ -185,6 +237,66 @@ def plot_sharpe_ranking(report: pd.DataFrame, path: Path) -> None:
     axis.set_title(title)
     style_axis(axis)
     save(fig, path)
+
+
+def chosen_evaluation_rows(frame: pd.DataFrame) -> tuple[pd.DataFrame, str]:
+    """Select the final holdout, or the latest available walk-forward fold."""
+    if "fold_kind" in frame and (frame["fold_kind"] == "final_holdout").any():
+        return frame[frame["fold_kind"] == "final_holdout"].copy(), "final holdout"
+    if {"fold_kind", "fold"}.issubset(frame.columns):
+        walk = frame[frame["fold_kind"] == "walk_forward"]
+        if not walk.empty:
+            fold = walk["fold"].max()
+            return walk[walk["fold"] == fold].copy(), f"walk-forward fold {fold}"
+    return frame.copy(), "all available evaluations"
+
+
+def rl_seed_sharpe_rows(metrics: pd.DataFrame) -> tuple[pd.DataFrame, str]:
+    """Return raw Sharpe observations for stochastic baselines in one evaluation period."""
+    chosen, label = chosen_evaluation_rows(metrics)
+    run_keys = [column for column in ("repetition", "seed") if column in chosen]
+    if not run_keys or "sharpe" not in chosen:
+        return chosen.iloc[0:0].copy(), label
+    counts = chosen.groupby("baseline")[run_keys].apply(lambda values: len(values.drop_duplicates()))
+    stochastic = counts[counts > 1].index
+    columns = ["baseline", *run_keys, "sharpe"]
+    return chosen[chosen["baseline"].isin(stochastic)].loc[:, columns].dropna(), label
+
+
+def plot_rl_seed_sharpe_distribution(metrics: pd.DataFrame, path: Path) -> bool:
+    rows, label = rl_seed_sharpe_rows(metrics)
+    if rows.empty:
+        return False
+    names = rows.groupby("baseline")["sharpe"].median().sort_values(ascending=False).index.tolist()
+    values = [rows.loc[rows["baseline"] == name, "sharpe"].to_numpy() for name in names]
+    fig, axis = plt.subplots(
+        figsize=(10, max(4.5, 0.55 * len(names))), constrained_layout=True
+    )
+    boxes = axis.boxplot(
+        values,
+        orientation="horizontal",
+        patch_artist=True,
+        showfliers=False,
+        medianprops={"color": "#222222", "linewidth": 1.4},
+        whiskerprops={"color": "#444444", "linewidth": 0.9},
+        capprops={"color": "#444444", "linewidth": 0.9},
+    )
+    axis.set_yticks(
+        np.arange(1, len(names) + 1),
+        [display_label(name) for name in names],
+    )
+    for box, name in zip(boxes["boxes"], names, strict=True):
+        box.set_facecolor(colour(name))
+        box.set_edgecolor("#222222")
+        box.set_linewidth(0.6)
+        box.set_alpha(0.82)
+    axis.invert_yaxis()
+    axis.axvline(0, color="#333333", linewidth=0.8)
+    axis.set_xlabel("Annualised Sharpe ratio")
+    axis.set_title(f"RL Sharpe distribution across training seeds — {label}")
+    style_axis(axis)
+    save(fig, path)
+    return True
 
 
 def plot_return_drawdown(report: pd.DataFrame, path: Path) -> None:
@@ -199,7 +311,7 @@ def plot_return_drawdown(report: pd.DataFrame, path: Path) -> None:
             marker="o",
             edgecolor="#222222",
             linewidth=0.5,
-            label=row.baseline,
+            label=display_label(row.baseline),
         )
     axis.set_xlabel("Absolute maximum drawdown (%)")
     axis.set_ylabel("CAGR (%)")
@@ -212,46 +324,93 @@ def plot_return_drawdown(report: pd.DataFrame, path: Path) -> None:
 
 
 def chosen_equity(equity: pd.DataFrame) -> tuple[pd.DataFrame, str]:
-    if (equity["fold_kind"] == "final_holdout").any():
-        chosen = equity[equity["fold_kind"] == "final_holdout"].copy()
-        label = "final holdout"
-    else:
-        fold = equity.loc[equity["fold_kind"] == "walk_forward", "fold"].max()
-        chosen = equity[(equity["fold_kind"] == "walk_forward") & (equity["fold"] == fold)].copy()
-        label = f"walk-forward fold {fold}"
+    chosen, label = chosen_evaluation_rows(equity)
     chosen["date"] = pd.to_datetime(chosen["date"])
     return chosen, label
 
 
+def close_price_matrix(prices: pd.DataFrame) -> pd.DataFrame:
+    """Return closes on a true datetime axis for time-series plotting."""
+    frame = prices.copy()
+    frame["date"] = pd.to_datetime(frame["date"])
+    return frame.pivot_table(
+        index="date",
+        columns="ticker",
+        values="close",
+        aggfunc="last",
+    ).sort_index()
+
+
+def cumulative_seed_summary(group: pd.DataFrame) -> pd.DataFrame:
+    """Summarise normalized equity paths without treating seeds as market samples."""
+    run_keys = [column for column in ("repetition", "seed") if column in group]
+    columns = run_keys or None
+    curves = group.pivot_table(index="date", columns=columns, values="equity")
+    if isinstance(curves, pd.Series):
+        curves = curves.to_frame("run")
+    curves = curves.sort_index().divide(curves.iloc[0])
+    result = pd.DataFrame(index=curves.index)
+    result["mean"] = curves.mean(axis=1)
+    result["lower"] = curves.quantile(0.10, axis=1)
+    result["upper"] = curves.quantile(0.90, axis=1)
+    result["seed_count"] = curves.shape[1]
+    return result
+
+
 def plot_cumulative_returns(
-    equity: pd.DataFrame, path: Path, *, exclude_benchmarks: bool = False
+    equity: pd.DataFrame,
+    path: Path,
+    baselines: list[str],
+    family_title: str,
 ) -> None:
     chosen, label = chosen_equity(equity)
-    if exclude_benchmarks:
-        chosen = chosen[
-            ~chosen["baseline"].isin({"buy_and_hold", "equal_weight_rebalanced"})
-        ]
+    chosen = chosen[chosen["baseline"].isin(baselines)]
     fig, axis = plt.subplots(figsize=(11, 6), constrained_layout=True)
-    for baseline in ordered_baselines(chosen["baseline"]):
+    has_seed_bands = False
+    for baseline in baselines:
         group = chosen[chosen["baseline"] == baseline]
-        curves = group.pivot_table(index="date", columns="repetition", values="equity")
-        curves = curves.divide(curves.iloc[0])
-        cumulative = curves.mean(axis=1) - 1
+        seed_summary = cumulative_seed_summary(group)
+        cumulative = seed_summary["mean"] - 1
+        if int(seed_summary["seed_count"].iloc[0]) > 1:
+            has_seed_bands = True
+            axis.fill_between(
+                seed_summary.index,
+                (seed_summary["lower"] - 1).to_numpy(),
+                (seed_summary["upper"] - 1).to_numpy(),
+                color=colour(baseline),
+                alpha=0.12,
+                linewidth=0,
+                zorder=1,
+            )
         axis.plot(
             cumulative.index,
             cumulative,
-            label=baseline,
+            label=display_label(baseline),
             **line_style(baseline, len(cumulative)),
         )
     axis.axhline(0, color="#333333", linewidth=0.8)
     axis.set_ylabel("Net cumulative return")
-    prefix = "Active-strategy " if exclude_benchmarks else ""
-    axis.set_title(f"{prefix}cumulative returns after transaction costs — {label}")
+    subtitle = "\nShading: 10th–90th percentile across training seeds" if has_seed_bands else ""
+    axis.set_title(
+        f"{family_title}: cumulative returns after transaction costs — {label}{subtitle}"
+    )
     format_dates(axis)
     format_percent(axis)
     style_axis(axis)
     axis.legend(fontsize=8, ncol=2)
     save(fig, path)
+
+
+def plot_family_cumulative_returns(equity: pd.DataFrame, report_dir: Path) -> list[Path]:
+    paths = []
+    for family in BASELINE_FAMILIES:
+        baselines = family_selection(equity["baseline"], family)
+        if not baselines:
+            continue
+        path = report_dir / f"cumulative_returns_{family}.png"
+        plot_cumulative_returns(equity, path, baselines, FAMILY_TITLES[family])
+        paths.append(path)
+    return paths
 
 
 def plot_turnover(report: pd.DataFrame, path: Path) -> None:
@@ -260,7 +419,7 @@ def plot_turnover(report: pd.DataFrame, path: Path) -> None:
     y = np.arange(len(names))
     bars = axis.barh(y, report["turnover_daily_mean"], color=[colour(name) for name in names])
     apply_bar_styles(bars, names)
-    axis.set_yticks(y, names)
+    axis.set_yticks(y, [display_label(name) for name in names])
     axis.invert_yaxis()
     axis.set_xlabel("Portfolio traded per day (%)")
     axis.set_title("Average daily turnover")
@@ -275,21 +434,45 @@ def plot_training_diagnostic(
     if diagnostics.empty or value not in diagnostics:
         return
     fig, axis = plt.subplots(figsize=(11, 6), constrained_layout=True)
-    grouped = diagnostics.groupby(["baseline", "epoch"], as_index=False)[value].mean()
+    grouped = training_diagnostic_series(diagnostics, value)
+    if grouped.empty:
+        plt.close(fig)
+        return
     for baseline in ordered_baselines(grouped["baseline"]):
         frame = grouped[grouped["baseline"] == baseline]
         axis.plot(
-            frame["epoch"],
+            frame["completed_epoch"],
             frame[value],
-            label=baseline,
+            label=display_label(baseline),
             **line_style(baseline, len(frame)),
         )
-    axis.set_xlabel("Training epoch")
+    axis.set_xlim(1, int(grouped["completed_epoch"].max()))
+    axis.xaxis.set_major_locator(mticker.MaxNLocator(nbins=6, integer=True))
+    axis.set_xlabel("Completed training epochs")
     axis.set_ylabel(ylabel)
-    axis.set_title(f"RL {ylabel.lower()} during training")
+    title = f"RL {ylabel.lower()} during training"
+    if value == "loss":
+        title += "\nLoss scales are algorithm-specific and not directly comparable"
+    axis.set_title(title)
     style_axis(axis)
     axis.legend(fontsize=8, ncol=2)
     save(fig, path)
+
+
+def training_diagnostic_series(diagnostics: pd.DataFrame, value: str) -> pd.DataFrame:
+    """Average agents within runs before averaging equally across runs."""
+    if diagnostics.empty or value not in diagnostics:
+        return pd.DataFrame(columns=["baseline", "epoch", value, "completed_epoch"])
+    run_keys = [
+        column
+        for column in ("baseline", "fold", "repetition", "seed", "epoch")
+        if column in diagnostics
+    ]
+    run_level = diagnostics.groupby(run_keys, as_index=False, dropna=False)[value].mean()
+    grouped = run_level.groupby(["baseline", "epoch"], as_index=False)[value].mean()
+    grouped = grouped.dropna(subset=[value]).sort_values(["baseline", "epoch"])
+    grouped["completed_epoch"] = grouped["epoch"].astype(int) + 1
+    return grouped
 
 
 def training_summary(diagnostics: pd.DataFrame) -> pd.DataFrame:
@@ -313,7 +496,10 @@ def plot_fold_stability(metrics: pd.DataFrame, path: Path) -> pd.DataFrame:
     fig, axis = plt.subplots(figsize=(10, max(4, 0.5 * len(pivot))), constrained_layout=True)
     image = axis.imshow(pivot.to_numpy(), cmap="RdYlGn", aspect="auto", vmin=-2, vmax=2)
     axis.set_xticks(np.arange(len(pivot.columns)), [f"Fold {value}" for value in pivot.columns])
-    axis.set_yticks(np.arange(len(pivot.index)), pivot.index)
+    axis.set_yticks(
+        np.arange(len(pivot.index)),
+        [display_label(name) for name in pivot.index],
+    )
     for row in range(len(pivot.index)):
         for column in range(len(pivot.columns)):
             value = pivot.iloc[row, column]
@@ -351,10 +537,28 @@ def plot_split_timeline(metrics: pd.DataFrame, path: Path) -> None:
             (row_number - 0.3, 0.6),
             facecolors="#F6BD16" if row.fold_kind == "walk_forward" else "#E8684A",
         )
-    labels = [f"{row.fold_kind.replace('_', ' ')} {row.fold}" for row in folds.itertuples()]
+    labels = [
+        "Final holdout"
+        if row.fold_kind == "final_holdout"
+        else f"Walk-forward fold {row.fold}"
+        for row in folds.itertuples()
+    ]
     axis.set_yticks(np.arange(len(folds)), labels)
-    axis.set_title("Purged walk-forward training and evaluation timeline")
+    axis.set_title(
+        "Purged walk-forward training and evaluation timeline\n"
+        "White boundary gaps denote the configured purge interval"
+    )
     axis.set_xlabel("Date")
+    axis.legend(
+        handles=[
+            Patch(facecolor="#5B8FF9", label="Training"),
+            Patch(facecolor="#F6BD16", label="Walk-forward evaluation"),
+            Patch(facecolor="#E8684A", label="Final holdout evaluation"),
+        ],
+        loc="upper left",
+        fontsize=8,
+        frameon=True,
+    )
     format_dates(axis)
     style_axis(axis)
     save(fig, path)
@@ -371,29 +575,46 @@ def sharpe_over_time_table(metrics: pd.DataFrame) -> pd.DataFrame:
     ).reset_index()
 
 
-def plot_sharpe_over_time(table: pd.DataFrame, path: Path) -> None:
+def plot_sharpe_over_time(
+    table: pd.DataFrame,
+    path: Path,
+    baselines: list[str],
+    family_title: str,
+) -> None:
     if table.empty:
         return
     fig, axis = plt.subplots(figsize=(11, 6), constrained_layout=True)
-    baseline_columns = [c for c in table if c not in {"fold", "test_start", "test_end"}]
     dates = pd.to_datetime(table["test_start"])
-    for baseline in baseline_columns:
+    for baseline in baselines:
         axis.plot(
             dates,
             table[baseline],
-            label=baseline,
+            label=display_label(baseline),
             **line_style(baseline, len(dates)),
         )
     axis.axhline(0, color="#333333", linewidth=0.8)
     axis.set_ylabel("Mean Sharpe ratio")
-    axis.set_title("Sharpe ratios over successive out-of-sample periods")
+    axis.set_title(f"{family_title}: Sharpe ratios over out-of-sample periods")
     format_dates(axis)
     style_axis(axis)
     axis.legend(fontsize=8, ncol=2)
     save(fig, path)
 
 
-def plot_crash_period(daily: pd.DataFrame, path: Path) -> int | None:
+def plot_family_sharpe_over_time(table: pd.DataFrame, report_dir: Path) -> list[Path]:
+    available = [column for column in table if column not in {"fold", "test_start", "test_end"}]
+    paths = []
+    for family in BASELINE_FAMILIES:
+        baselines = family_selection(available, family)
+        if not baselines:
+            continue
+        path = report_dir / f"sharpe_over_time_{family}.png"
+        plot_sharpe_over_time(table, path, baselines, FAMILY_TITLES[family])
+        paths.append(path)
+    return paths
+
+
+def plot_crash_period(daily: pd.DataFrame, report_dir: Path) -> int | None:
     if daily.empty:
         return None
     daily = daily.copy()
@@ -410,27 +631,33 @@ def plot_crash_period(daily: pd.DataFrame, path: Path) -> int | None:
     yearly = candidates.groupby("year")["net_return"].apply(lambda values: (1 + values).prod() - 1)
     crash_year = int(yearly.idxmin())
     crash = daily[daily["year"] == crash_year]
-    fig, axis = plt.subplots(figsize=(11, 6), constrained_layout=True)
-    for baseline in ordered_baselines(crash["baseline"]):
-        group = crash[crash["baseline"] == baseline]
-        mean_return = group.pivot_table(
-            index="date", columns="repetition", values="net_return"
-        ).mean(axis=1)
-        cumulative = (1 + mean_return).cumprod() - 1
-        axis.plot(
-            cumulative.index,
-            cumulative,
-            label=baseline,
-            **line_style(baseline, len(cumulative)),
+    for family in BASELINE_FAMILIES:
+        baselines = family_selection(crash["baseline"], family)
+        if not baselines:
+            continue
+        fig, axis = plt.subplots(figsize=(11, 6), constrained_layout=True)
+        for baseline in baselines:
+            group = crash[crash["baseline"] == baseline]
+            mean_return = group.pivot_table(
+                index="date", columns="repetition", values="net_return"
+            ).mean(axis=1)
+            cumulative = (1 + mean_return).cumprod() - 1
+            axis.plot(
+                cumulative.index,
+                cumulative,
+                label=display_label(baseline),
+                **line_style(baseline, len(cumulative)),
+            )
+        axis.axhline(0, color="#333333", linewidth=0.8)
+        axis.set_ylabel("Net cumulative return")
+        axis.set_title(
+            f"{FAMILY_TITLES[family]} during the worst buy-and-hold year ({crash_year})"
         )
-    axis.axhline(0, color="#333333", linewidth=0.8)
-    axis.set_ylabel("Net cumulative return")
-    axis.set_title(f"Cumulative returns during the worst buy-and-hold year ({crash_year})")
-    format_dates(axis)
-    format_percent(axis)
-    style_axis(axis)
-    axis.legend(fontsize=8, ncol=2)
-    save(fig, path)
+        format_dates(axis)
+        format_percent(axis)
+        style_axis(axis)
+        axis.legend(fontsize=8, ncol=2)
+        save(fig, report_dir / f"crash_period_cumulative_returns_{family}.png")
     return crash_year
 
 
@@ -450,17 +677,20 @@ def plot_prediction_vs_actual(predictions: pd.DataFrame, report_dir: Path) -> li
             smooth["actual_return"],
             color="#333333",
             linewidth=1.8,
-            label="Actual next-day return",
+            label="Actual target-horizon return",
         )
         axis.plot(
             smooth.index,
             smooth["prediction"],
-            label="Predicted next-day return",
+            label="Predicted target-horizon return",
             **line_style(baseline, len(smooth)),
         )
         axis.axhline(0, color="#777777", linewidth=0.7)
         axis.set_ylabel("Cross-stock mean return (%)")
-        axis.set_title(f"Prediction versus actual return — {baseline} ({label}, 21-day mean)")
+        axis.set_title(
+            f"Prediction versus actual return — {display_label(baseline)} "
+            f"({label}, 21-day mean)"
+        )
         format_dates(axis)
         format_percent(axis)
         style_axis(axis)
@@ -471,38 +701,79 @@ def plot_prediction_vs_actual(predictions: pd.DataFrame, report_dir: Path) -> li
     return paths
 
 
+def representative_runs(metrics: pd.DataFrame) -> pd.DataFrame:
+    """Choose one observed run nearest each baseline's median Sharpe."""
+    chosen, _ = chosen_evaluation_rows(metrics)
+    required = {"baseline", "fold", "fold_kind", "repetition", "seed", "sharpe"}
+    if not required.issubset(chosen.columns):
+        return pd.DataFrame(columns=[*required, "run_count"])
+    rows = []
+    for baseline, group in chosen.groupby("baseline", sort=False):
+        candidates = group.dropna(subset=["sharpe"]).copy()
+        if candidates.empty:
+            continue
+        median = float(candidates["sharpe"].median())
+        candidates["median_distance"] = (
+            candidates["sharpe"] - median
+        ).abs().round(12)
+        selected = candidates.sort_values(
+            ["median_distance", "seed", "repetition"], kind="stable"
+        ).iloc[0]
+        rows.append(
+            {
+                "baseline": baseline,
+                "fold": selected["fold"],
+                "fold_kind": selected["fold_kind"],
+                "repetition": selected["repetition"],
+                "seed": selected["seed"],
+                "sharpe": selected["sharpe"],
+                "run_count": len(candidates),
+                "test_start": selected.get("test_start"),
+                "test_end": selected.get("test_end"),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def plot_trade_action_curves(
-    positions: pd.DataFrame, prices: pd.DataFrame, report_dir: Path
+    trades: pd.DataFrame,
+    prices: pd.DataFrame,
+    metrics: pd.DataFrame,
+    report_dir: Path,
 ) -> list[Path]:
-    """Plot close prices with buy/increase and sell/reduce target-position changes."""
-    if positions.empty or prices.empty:
+    """Plot one real run's actual executed changes on close prices."""
+    if trades.empty or prices.empty or "executed_change" not in trades:
         return []
-    chosen, label = chosen_equity(positions)
+    chosen, label = chosen_equity(trades)
     chosen = chosen[
         ~chosen["baseline"].isin({"buy_and_hold", "equal_weight_rebalanced"})
     ]
-    closes = prices.pivot_table(
-        index="date", columns="ticker", values="close", aggfunc="last"
-    ).sort_index()
+    representatives = representative_runs(metrics)
+    merge_keys = ["baseline", "fold", "fold_kind", "repetition", "seed"]
+    chosen = chosen.merge(
+        representatives[merge_keys], on=merge_keys, how="inner", validate="many_to_one"
+    )
+    closes = close_price_matrix(prices)
     paths = []
     for baseline in ordered_baselines(chosen["baseline"]):
         frame = chosen[chosen["baseline"] == baseline]
-        matrix = frame.pivot_table(
-            index="date", columns="ticker", values="position", aggfunc="mean"
-        ).sort_index()
-        if matrix.empty:
-            continue
-        actions = matrix.diff()
-        actions.iloc[0] = matrix.iloc[0]
-        for ticker in matrix.columns:
+        representative = representatives[representatives["baseline"] == baseline].iloc[0]
+        run_note = (
+            f"; representative seed {int(representative.seed)}, nearest median Sharpe"
+            if int(representative.run_count) > 1
+            else ""
+        )
+        for ticker in sorted(frame["ticker"].unique()):
             if ticker not in closes:
                 continue
-            price = closes[ticker].reindex(matrix.index).dropna()
+            start = pd.Timestamp(representative["test_start"])
+            end = pd.Timestamp(representative["test_end"])
+            price = closes[ticker].loc[start:end].dropna()
             if price.empty:
                 continue
-            action = actions[ticker].reindex(price.index).fillna(0.0)
-            buy_dates = action.index[action > 1e-8]
-            sell_dates = action.index[action < -1e-8]
+            ticker_trades = frame[frame["ticker"] == ticker].set_index("date")
+            buy_dates = ticker_trades.index[ticker_trades["executed_change"] > 0]
+            sell_dates = ticker_trades.index[ticker_trades["executed_change"] < 0]
 
             fig, axis = plt.subplots(figsize=(11, 6), constrained_layout=True)
             axis.plot(
@@ -538,7 +809,10 @@ def plot_trade_action_curves(
                     zorder=4,
                 )
             axis.set_ylabel("Close price")
-            axis.set_title(f"Buy/sell decisions — {baseline}, {ticker} ({label})")
+            axis.set_title(
+                f"Buy/sell decisions — {display_label(baseline)}, "
+                f"{ticker} ({label}{run_note})"
+            )
             format_dates(axis)
             style_axis(axis)
             axis.legend(fontsize=9)
@@ -548,13 +822,165 @@ def plot_trade_action_curves(
     return paths
 
 
-def cost_sensitivity(run_dir: Path, positions: pd.DataFrame, path: Path | None) -> pd.DataFrame:
+def trade_timing_summary(trades: pd.DataFrame, prices: pd.DataFrame) -> pd.DataFrame:
+    """Summarise causal price location and future movement after executed trades."""
+    columns = [
+        "baseline",
+        "side",
+        "runs",
+        "trades_per_run_mean",
+        "days_between_same_side_trades_mean",
+        "range_position_20_mean",
+        "forward_return_5_mean",
+        "forward_return_20_mean",
+        "favourable_excursion_5_mean",
+        "adverse_excursion_5_mean",
+        "directional_hit_rate_5",
+        "directional_hit_rate_20",
+        "matched_random_hit_rate_5",
+        "directional_hit_lift_5",
+    ]
+    if trades.empty or prices.empty or "executed_change" not in trades:
+        return pd.DataFrame(columns=columns)
+    chosen, _ = chosen_equity(trades)
+    market = prices.sort_values(["ticker", "date"]).copy()
+    grouped = market.groupby("ticker", group_keys=False)
+    rolling_low = grouped["close"].transform(lambda values: values.rolling(20).min())
+    rolling_high = grouped["close"].transform(lambda values: values.rolling(20).max())
+    market["range_position_20"] = (
+        (market["close"] - rolling_low)
+        / (rolling_high - rolling_low).replace(0, np.nan)
+    )
+    for horizon in (5, 20):
+        market[f"forward_return_{horizon}"] = grouped["close"].transform(
+            lambda values, h=horizon: values.shift(-h) / values - 1
+        )
+    future = pd.concat(
+        [grouped["close"].shift(-offset) for offset in range(1, 6)], axis=1
+    )
+    market["future_max_5"] = future.max(axis=1) / market["close"] - 1
+    market["future_min_5"] = future.min(axis=1) / market["close"] - 1
+    merged = chosen.merge(
+        market[
+            [
+                "date",
+                "ticker",
+                "range_position_20",
+                "forward_return_5",
+                "forward_return_20",
+                "future_max_5",
+                "future_min_5",
+            ]
+        ],
+        on=["date", "ticker"],
+        how="left",
+        validate="many_to_one",
+    )
+    merged["side"] = np.where(merged["executed_change"] > 0, "buy", "sell")
+    buy = merged["side"] == "buy"
+    merged["favourable_excursion_5"] = np.where(
+        buy, merged["future_max_5"], -merged["future_min_5"]
+    )
+    merged["adverse_excursion_5"] = np.where(
+        buy, merged["future_min_5"], -merged["future_max_5"]
+    )
+    merged["directional_hit_5"] = np.where(
+        buy, merged["forward_return_5"] > 0, merged["forward_return_5"] < 0
+    )
+    merged["directional_hit_20"] = np.where(
+        buy, merged["forward_return_20"] > 0, merged["forward_return_20"] < 0
+    )
+    run_columns = ["baseline", "fold", "fold_kind", "repetition", "seed", "side"]
+    merged = merged.sort_values([*run_columns, "ticker", "date"])
+    merged["days_between_same_side_trades"] = (
+        merged.groupby([*run_columns, "ticker"])["date"].diff().dt.days
+    )
+
+    random_hit_rates: dict[tuple, float] = {}
+    for run_key, run_trades in merged.groupby(run_columns, sort=False, dropna=False):
+        baseline, fold, _, repetition, seed, side = run_key
+        seed_value = (
+            sum(str(baseline).encode("utf-8"))
+            + 1009 * int(fold)
+            + 9176 * int(repetition)
+            + 37 * int(seed)
+            + (1 if side == "buy" else 2)
+        )
+        rng = np.random.default_rng(seed_value)
+        sampled_returns = []
+        for ticker, ticker_trades in run_trades.groupby("ticker"):
+            candidates = market[market["ticker"] == ticker]
+            if "test_start" in ticker_trades and ticker_trades["test_start"].notna().any():
+                candidates = candidates[
+                    candidates["date"] >= pd.Timestamp(ticker_trades["test_start"].dropna().iloc[0])
+                ]
+            if "test_end" in ticker_trades and ticker_trades["test_end"].notna().any():
+                candidates = candidates[
+                    candidates["date"] <= pd.Timestamp(ticker_trades["test_end"].dropna().iloc[0])
+                ]
+            candidates = candidates.dropna(subset=["forward_return_5"])
+            if candidates.empty:
+                continue
+            selected = rng.choice(
+                len(candidates), size=len(ticker_trades), replace=len(ticker_trades) > len(candidates)
+            )
+            sampled_returns.extend(candidates.iloc[selected]["forward_return_5"].tolist())
+        if sampled_returns:
+            values = np.asarray(sampled_returns)
+            random_hit_rates[run_key] = float(
+                np.mean(values > 0) if side == "buy" else np.mean(values < 0)
+            )
+
+    per_run = (
+        merged.groupby(run_columns, as_index=False, dropna=False)
+        .agg(
+            trades_per_run=("executed_change", "size"),
+            days_between_same_side_trades=("days_between_same_side_trades", "mean"),
+            range_position_20_mean=("range_position_20", "mean"),
+            forward_return_5_mean=("forward_return_5", "mean"),
+            forward_return_20_mean=("forward_return_20", "mean"),
+            favourable_excursion_5_mean=("favourable_excursion_5", "mean"),
+            adverse_excursion_5_mean=("adverse_excursion_5", "mean"),
+            directional_hit_rate_5=("directional_hit_5", "mean"),
+            directional_hit_rate_20=("directional_hit_20", "mean"),
+        )
+    )
+    per_run["matched_random_hit_rate_5"] = [
+        random_hit_rates.get(tuple(row), np.nan)
+        for row in per_run[run_columns].itertuples(index=False, name=None)
+    ]
+    per_run["directional_hit_lift_5"] = (
+        per_run["directional_hit_rate_5"] - per_run["matched_random_hit_rate_5"]
+    )
+    return (
+        per_run.groupby(["baseline", "side"], as_index=False)
+        .agg(
+            runs=("seed", "size"),
+            trades_per_run_mean=("trades_per_run", "mean"),
+            days_between_same_side_trades_mean=("days_between_same_side_trades", "mean"),
+            range_position_20_mean=("range_position_20_mean", "mean"),
+            forward_return_5_mean=("forward_return_5_mean", "mean"),
+            forward_return_20_mean=("forward_return_20_mean", "mean"),
+            favourable_excursion_5_mean=("favourable_excursion_5_mean", "mean"),
+            adverse_excursion_5_mean=("adverse_excursion_5_mean", "mean"),
+            directional_hit_rate_5=("directional_hit_rate_5", "mean"),
+            directional_hit_rate_20=("directional_hit_rate_20", "mean"),
+            matched_random_hit_rate_5=("matched_random_hit_rate_5", "mean"),
+            directional_hit_lift_5=("directional_hit_lift_5", "mean"),
+        )
+        .loc[:, columns]
+    )
+
+
+def cost_sensitivity(run_dir: Path, positions: pd.DataFrame) -> pd.DataFrame:
     prices = pd.read_csv(run_dir / "data" / "prices.csv", parse_dates=["date"])
     closes = prices.pivot(index="date", columns="ticker", values="close").sort_index()
     manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
     execution = manifest["config"]["execution"]
     initial_capital = execution["initial_capital"]
     borrow_bps = execution.get("short_borrow_bps_annual", 0.0)
+    rebalance_threshold = execution.get("rebalance_threshold", 0.0)
+    decision_interval = execution.get("decision_interval", 1)
     rows = []
     keys = ["baseline", "fold", "fold_kind", "repetition", "seed"]
     for key, group in positions.groupby(keys, dropna=False):
@@ -584,32 +1010,74 @@ def cost_sensitivity(run_dir: Path, positions: pd.DataFrame, path: Path | None) 
                     transaction_cost_bps=total_cost,
                     slippage_bps=0,
                     short_borrow_bps_annual=borrow_bps,
+                    rebalance_threshold=rebalance_threshold,
+                    decision_interval=decision_interval,
                 )
             rows.append({**metadata, "cost_bps": total_cost, "sharpe": result.metrics["sharpe"]})
     sensitivity = pd.DataFrame(rows)
-    if path is not None:
-        plot_cost_sensitivity(sensitivity, path)
     return sensitivity
 
 
-def plot_cost_sensitivity(sensitivity: pd.DataFrame, path: Path) -> None:
+def plot_cost_sensitivity(
+    sensitivity: pd.DataFrame,
+    path: Path,
+    baselines: list[str],
+    family_title: str,
+    scope_label: str,
+) -> None:
     fig, axis = plt.subplots(figsize=(10, 6), constrained_layout=True)
-    for baseline in ordered_baselines(sensitivity["baseline"]):
+    for baseline in baselines:
         group = sensitivity[sensitivity["baseline"] == baseline]
         curve = group.groupby("cost_bps")["sharpe"].mean()
         axis.plot(
             curve.index,
             curve.values,
-            label=baseline,
+            label=display_label(baseline),
             **line_style(baseline, len(curve)),
         )
     axis.axhline(0, color="#333333", linewidth=0.8)
-    axis.set_title("Sharpe ratio under common trading-cost scenarios")
+    axis.set_title(
+        f"{family_title}: Sharpe ratio under common trading-cost scenarios\n{scope_label}"
+    )
     axis.set_xlabel("Transaction cost and slippage (bps per unit turnover)")
     axis.set_ylabel("Mean out-of-sample Sharpe ratio")
     style_axis(axis)
     axis.legend(fontsize=8, ncol=2)
     save(fig, path)
+
+
+def cost_sensitivity_scope(sensitivity: pd.DataFrame) -> tuple[pd.DataFrame, str]:
+    """Use one explicit evaluation scope and avoid treating seeds as folds."""
+    if "fold_kind" not in sensitivity:
+        return sensitivity.copy(), "all available evaluation rows"
+    if (sensitivity["fold_kind"] == "final_holdout").any():
+        return (
+            sensitivity[sensitivity["fold_kind"] == "final_holdout"].copy(),
+            "final holdout (mean across training seeds)",
+        )
+    walk = sensitivity[sensitivity["fold_kind"] == "walk_forward"].copy()
+    if walk.empty:
+        return sensitivity.copy(), "all available evaluation rows"
+    keys = ["baseline", "fold", "fold_kind", "cost_bps"]
+    return (
+        walk.groupby(keys, as_index=False)["sharpe"].mean(),
+        "walk-forward folds (seed mean per fold)",
+    )
+
+
+def plot_family_cost_sensitivity(sensitivity: pd.DataFrame, report_dir: Path) -> list[Path]:
+    scoped, scope_label = cost_sensitivity_scope(sensitivity)
+    paths = []
+    for family in BASELINE_FAMILIES:
+        baselines = family_selection(scoped["baseline"], family)
+        if not baselines:
+            continue
+        path = report_dir / f"cost_sensitivity_{family}.png"
+        plot_cost_sensitivity(
+            scoped, path, baselines, FAMILY_TITLES[family], scope_label
+        )
+        paths.append(path)
+    return paths
 
 
 def performance_table(report: pd.DataFrame) -> pd.DataFrame:
@@ -655,6 +1123,12 @@ def build_report(
     prices = pd.read_csv(run_dir / "data" / "prices.csv", parse_dates=["date"])
     daily_path = run_dir / "daily_returns.csv"
     daily = pd.read_csv(daily_path, parse_dates=["date"]) if daily_path.exists() else pd.DataFrame()
+    trades_path = run_dir / "trades.csv"
+    trades = (
+        pd.read_csv(trades_path, parse_dates=["date"])
+        if trades_path.exists()
+        else pd.DataFrame()
+    )
     diagnostics_path = run_dir / "training_diagnostics.csv"
     diagnostics = pd.read_csv(diagnostics_path) if diagnostics_path.exists() else pd.DataFrame()
     predictions_path = run_dir / "predictions.csv"
@@ -670,15 +1144,14 @@ def build_report(
     sensitivity_path = report_dir / "cost_sensitivity.csv"
     if sensitivity_path.exists():
         sensitivity = pd.read_csv(sensitivity_path)
-        if "png" in formats:
-            plot_cost_sensitivity(sensitivity, report_dir / "cost_sensitivity.png")
     else:
         sensitivity = cost_sensitivity(
             run_dir,
             positions,
-            report_dir / "cost_sensitivity.png" if "png" in formats else None,
         )
     diagnostic_summary = training_summary(diagnostics)
+    timing_summary = trade_timing_summary(trades, prices)
+    _, sensitivity_scope_label = cost_sensitivity_scope(sensitivity)
 
     if "csv" in formats:
         report.to_csv(report_dir / "summary.csv", index=False)
@@ -687,6 +1160,8 @@ def build_report(
         sensitivity.to_csv(report_dir / "cost_sensitivity.csv", index=False)
         if not diagnostic_summary.empty:
             diagnostic_summary.to_csv(report_dir / "training_summary.csv", index=False)
+        if not timing_summary.empty:
+            timing_summary.to_csv(report_dir / "trade_timing_summary.csv", index=False)
     if "md" in formats:
         (report_dir / "performance_comparison.md").write_text(
             markdown_table(comparison), encoding="utf-8"
@@ -694,24 +1169,32 @@ def build_report(
         (report_dir / "sharpe_over_time.md").write_text(
             markdown_table(sharpe_table), encoding="utf-8"
         )
+        if not timing_summary.empty:
+            (report_dir / "trade_timing_summary.md").write_text(
+                markdown_table(timing_summary), encoding="utf-8"
+            )
 
     crash_year = None
     if "png" in formats:
         plot_sharpe_ranking(report, report_dir / "sharpe_ranking.png")
-        plot_return_drawdown(report, report_dir / "return_vs_drawdown.png")
-        plot_cumulative_returns(equity, report_dir / "cumulative_returns_net.png")
-        plot_cumulative_returns(
-            equity,
-            report_dir / "active_cumulative_returns_net.png",
-            exclude_benchmarks=True,
+        plot_rl_seed_sharpe_distribution(
+            metrics, report_dir / "rl_seed_sharpe_distribution.png"
         )
+        plot_return_drawdown(report, report_dir / "return_vs_drawdown.png")
+        plot_family_cumulative_returns(equity, report_dir)
         plot_turnover(report, report_dir / "turnover.png")
         plot_fold_stability(metrics, report_dir / "fold_stability.png")
         plot_split_timeline(metrics, report_dir / "data_split_timeline.png")
-        plot_sharpe_over_time(sharpe_table, report_dir / "sharpe_over_time.png")
-        crash_year = plot_crash_period(daily, report_dir / "crash_period_cumulative_returns.png")
+        plot_family_sharpe_over_time(sharpe_table, report_dir)
+        plot_family_cost_sensitivity(sensitivity, report_dir)
+        crash_year = plot_crash_period(daily, report_dir)
         plot_prediction_vs_actual(predictions, report_dir)
-        plot_trade_action_curves(positions, prices, report_dir)
+        plot_trade_action_curves(
+            trades,
+            prices,
+            metrics,
+            report_dir,
+        )
         if not diagnostics.empty:
             plot_training_diagnostic(
                 diagnostics,
@@ -747,12 +1230,18 @@ def build_report(
         "Each analytical view is saved as a separate figure so it can be placed, captioned, and "
         "scaled independently in the dissertation. The split timeline documents the experimental "
         "protocol; Sharpe ranking and fold paths address level and stability; net cumulative "
-        "returns show economic magnitude; drawdown, turnover, and cost sensitivity cover risk "
-        "and implementability. The active-only cumulative-return figure prevents the passive "
-        "benchmark from compressing differences among trading strategies. Prediction figures use "
-        "out-of-sample forecasts in return units. Each trade-action figure overlays target-position "
-        "changes on the corresponding stock-price curve; green upward triangles denote buy/increase "
-        "decisions and red downward triangles denote sell/reduce decisions.\n\n"
+        "returns show economic magnitude, with 10th–90th percentile bands describing stochastic "
+        "training-seed dispersion. The separate RL boxplot shows the raw seed-level Sharpe "
+        "distribution on the same market path; it does not quantify market-regime uncertainty. "
+        "Drawdown, turnover, and cost sensitivity cover risk and implementability. Cost-sensitivity "
+        f"figures use {sensitivity_scope_label}. Crowded line comparisons are separated by strategy "
+        "family, with "
+        "the passive baselines repeated as common reference curves. Prediction figures use "
+        "out-of-sample forecasts in return units. Stochastic trade-action figures use the observed "
+        "seed nearest the baseline's median Sharpe, rather than an average policy. They overlay only "
+        "actual executed stock-level changes from the backtest on the corresponding stock-price "
+        "curve; green upward triangles denote buy/increase decisions and "
+        "red downward triangles denote sell/reduce decisions.\n\n"
         f"{crash_note}\n"
     )
     if "md" in formats:

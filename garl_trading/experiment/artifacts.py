@@ -22,6 +22,7 @@ class ArtifactStore:
         self.positions: list[pd.DataFrame] = []
         self.equity: list[pd.DataFrame] = []
         self.daily_returns: list[pd.DataFrame] = []
+        self.trades: list[pd.DataFrame] = []
         self.predictions: list[pd.DataFrame] = []
         self.training_diagnostics: list[pd.DataFrame] = []
         self.tuning_parameters: list[dict] = []
@@ -57,6 +58,7 @@ class ArtifactStore:
         costs: pd.Series | None = None,
         turnover: pd.Series | None = None,
         cash_exposure: pd.Series | None = None,
+        trades: pd.DataFrame | None = None,
     ) -> None:
         self.metrics.append({**metadata, **metrics})
         position_frame = positions.stack().rename("position").reset_index()
@@ -83,6 +85,11 @@ class ArtifactStore:
             for key, value in metadata.items():
                 daily[key] = value
             self.daily_returns.append(daily)
+        if trades is not None and not trades.empty:
+            trade_frame = trades.copy()
+            for key, value in metadata.items():
+                trade_frame[key] = value
+            self.trades.append(trade_frame)
 
     def add_failure(self, **values) -> None:
         self.failures.append(values)
@@ -143,6 +150,10 @@ class ArtifactStore:
         if self.daily_returns:
             pd.concat(self.daily_returns, ignore_index=True).to_csv(
                 self.path / "daily_returns.csv", index=False
+            )
+        if self.trades:
+            pd.concat(self.trades, ignore_index=True).to_csv(
+                self.path / "trades.csv", index=False
             )
         if self.predictions:
             pd.concat(self.predictions, ignore_index=True).to_csv(

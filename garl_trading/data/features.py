@@ -23,6 +23,7 @@ FEATURE_COLUMNS = (
     "volatility_30",
     "volume_z_20",
     "obv_slope_10",
+    "range_position_20",
 )
 
 
@@ -59,7 +60,7 @@ def adx(frame: pd.DataFrame, window: int = 14) -> pd.Series:
     return dx.ewm(alpha=1 / window, adjust=False, min_periods=window).mean() / 100
 
 
-def build_features(frame: pd.DataFrame, horizon: int = 1) -> pd.DataFrame:
+def build_features(frame: pd.DataFrame, horizon: int = 5) -> pd.DataFrame:
     close, high, low, volume = frame["close"], frame["high"], frame["low"], frame["volume"]
     out = pd.DataFrame(index=frame.index)
     for period in (1, 5, 10):
@@ -80,6 +81,11 @@ def build_features(frame: pd.DataFrame, horizon: int = 1) -> pd.DataFrame:
     middle = close.rolling(20).mean()
     width = close.rolling(20).std().replace(0, np.nan)
     out["bb_zscore"] = (close - middle) / (2 * width)
+    rolling_low = close.rolling(20).min()
+    rolling_high = close.rolling(20).max()
+    out["range_position_20"] = (
+        (close - rolling_low) / (rolling_high - rolling_low).replace(0, np.nan)
+    )
     previous = close.shift(1)
     true_range = pd.concat(
         [(high - low).abs(), (high - previous).abs(), (low - previous).abs()], axis=1

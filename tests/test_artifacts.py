@@ -29,6 +29,24 @@ def test_artifact_store_saves_config_and_market_snapshot(tmp_path):
         pd.Series([0.01, -0.02], index=dates),
         pd.Series([0.02, -0.01], index=dates),
     )
+    store.add_result(
+        {"baseline": "garl_ddal", "fold": 0, "fold_kind": "walk_forward"},
+        {"sharpe": 0.5},
+        pd.DataFrame({"AAA": [0.0, 1.0]}, index=dates),
+        pd.Series([100_000.0, 101_000.0], index=dates),
+        trades=pd.DataFrame(
+            {
+                "date": [dates[1]],
+                "ticker": ["AAA"],
+                "pretrade_position": [0.0],
+                "target_position": [1.0],
+                "executed_change": [1.0],
+                "execution_price": [101.0],
+                "transaction_cost": [0.0007],
+                "short_borrow_cost": [0.0],
+            }
+        ),
+    )
     store.flush()
     assert (store.path / "manifest.json").exists()
     assert (store.path / "config.toml").exists()
@@ -41,6 +59,8 @@ def test_artifact_store_saves_config_and_market_snapshot(tmp_path):
     predictions = pd.read_csv(store.path / "predictions.csv")
     assert set(predictions.columns) >= {"prediction", "actual_return", "ticker"}
     assert len(predictions) == 2
+    trades = pd.read_csv(store.path / "trades.csv")
+    assert trades.loc[0, "executed_change"] == 1.0
 
 
 def test_cuda_index_is_a_valid_configured_device():

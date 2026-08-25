@@ -20,6 +20,7 @@ class DataConfig:
     end: str = "2025-12-31"
     tickers: tuple[str, ...] = ("NVDA", "AAPL", "MSFT", "JPM", "BAC", "MS", "CAT", "RTX", "BA")
     adjust_prices: bool = True
+    target_horizon: int = 5
 
 
 @dataclass(frozen=True)
@@ -28,7 +29,7 @@ class ValidationConfig:
     inner_folds: int = 3
     min_train_bars: int = 1260
     max_train_bars: int = 1864
-    embargo_bars: int = 1
+    embargo_bars: int = 5
     final_holdout_start: str | None = "2023-01-01"
     use_final_holdout: bool = True
 
@@ -40,6 +41,8 @@ class ExecutionConfig:
     slippage_bps: float = 2.0
     short_borrow_bps_annual: float = 50.0
     position_levels: tuple[float, ...] = (-1.0, 0.0, 1.0)
+    decision_interval: int = 5
+    rebalance_threshold: float = 0.20
 
 
 @dataclass(frozen=True)
@@ -74,7 +77,7 @@ class ModelsConfig:
     rollout_length: int = 32
     learning_rate: float = 3e-4
     gamma: float = 0.95
-    turnover_penalty_multiplier: float = 1.0
+    turnover_penalty_multiplier: float = 2.0
     # Zero disables checkpoint-based early stopping and keeps the final fixed-step model.
     early_stopping_patience: int = 0
     early_stopping_min_delta: float = 1e-4
@@ -113,10 +116,14 @@ class FrameworkConfig:
     def validate(self) -> None:
         if not self.data.tickers:
             raise ValueError("At least one ticker is required.")
+        if self.data.target_horizon < 1:
+            raise ValueError("target_horizon must be positive.")
         if self.validation.outer_folds < 1 or self.validation.inner_folds < 1:
             raise ValueError("Fold counts must be positive.")
         if self.validation.max_train_bars < self.validation.min_train_bars:
             raise ValueError("max_train_bars must be >= min_train_bars.")
+        if self.validation.embargo_bars < self.data.target_horizon:
+            raise ValueError("embargo_bars must be at least target_horizon.")
         if self.experiment.repetitions < 1:
             raise ValueError("repetitions must be positive.")
         if self.models.lookback < 2 or self.models.train_epochs < 1:
@@ -167,6 +174,10 @@ class FrameworkConfig:
             )
         ):
             raise ValueError("Execution costs cannot be negative.")
+        if not 0 <= self.execution.rebalance_threshold < 2:
+            raise ValueError("rebalance_threshold must lie in [0, 2).")
+        if self.execution.decision_interval < 1:
+            raise ValueError("decision_interval must be positive.")
         valid_device = self.models.device in {"auto", "cpu", "mps", "cuda"}
         valid_device |= (
             self.models.device.startswith("cuda:")
@@ -177,6 +188,10 @@ class FrameworkConfig:
         levels = self.execution.position_levels
         if not levels or min(levels) < -1 or max(levels) > 1:
             raise ValueError("Position levels must lie in [-1, 1].")
+        if tuple(levels) != (-1.0, 0.0, 1.0):
+            raise ValueError(
+                "Incremental RL actions require position_levels = [-1.0, 0.0, 1.0]."
+            )
         if self.tuning.objective not in {"sharpe", "sortino", "calmar", "total_return"}:
             raise ValueError("Unsupported tuning objective.")
         if not set(self.reporting.formats).issubset({"png", "csv", "md"}):

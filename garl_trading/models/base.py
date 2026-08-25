@@ -11,6 +11,7 @@ import pandas as pd
 class ModelContext:
     features: pd.DataFrame
     realised_targets: pd.Series | None = None
+    target_horizon: int = 1
 
 
 class ForecastModel(ABC):

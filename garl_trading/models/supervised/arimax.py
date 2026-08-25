@@ -88,10 +88,20 @@ class RollingARIMAX(ForecastModel):
     ) -> pd.Series:
         x_history = self.history_x.copy()
         y_history = self.history_y.copy()
+        delay = max(1, context.target_horizon if context is not None else 1)
+        context_features = features.loc[features.index[:0], self.columns].copy()
+        context_targets = pd.Series(dtype=float)
         if context is not None and context.realised_targets is not None:
-            context_valid = context.features.notna().all(axis=1) & context.realised_targets.notna()
-            x_history = pd.concat([x_history, context.features.loc[context_valid, self.columns]])
-            y_history = pd.concat([y_history, context.realised_targets.loc[context_valid]])
+            context_features = context.features.loc[:, self.columns]
+            context_targets = context.realised_targets.reindex(context_features.index)
+            # At the first forecast date, a horizon-h target is observable only
+            # through origin t-h.  The final h-1 context labels mature later.
+            initially_observable = max(0, len(context_features) - delay + 1)
+            initial_features = context_features.iloc[:initially_observable]
+            initial_targets = context_targets.iloc[:initially_observable]
+            context_valid = initial_features.notna().all(axis=1) & initial_targets.notna()
+            x_history = pd.concat([x_history, initial_features.loc[context_valid]])
+            y_history = pd.concat([y_history, initial_targets.loc[context_valid]])
             x_history = x_history.loc[~x_history.index.duplicated(keep="last")].sort_index()
             y_history = y_history.loc[~y_history.index.duplicated(keep="last")].sort_index()
 
@@ -101,16 +111,33 @@ class RollingARIMAX(ForecastModel):
         fitted = None
         for i, date in enumerate(x_test.index):
             if i > 0:
-                previous = x_test.index[i - 1]
-                x_history = pd.concat([x_history, x_test.loc[[previous]]])
-                value = observed.loc[previous] if observed is not None else predictions[previous]
-                y_history = pd.concat([y_history, pd.Series([value], index=[previous])])
-                if fitted is not None:
+                combined_features = pd.concat([context_features, x_test])
+                combined_targets = pd.concat(
+                    [
+                        context_targets,
+                        observed if observed is not None else pd.Series(index=x_test.index, dtype=float),
+                    ]
+                )
+                origin = len(context_features) - delay + i
+                origin_date = combined_features.index[origin]
+                value = combined_targets.iloc[origin]
+                if not np.isfinite(value) and origin_date in predictions:
+                    value = predictions[origin_date]
+                origin_features = combined_features.iloc[[origin]]
+                valid_observation = bool(
+                    np.isfinite(value) and origin_features.notna().all(axis=1).iloc[0]
+                )
+                if valid_observation:
+                    x_history = pd.concat([x_history, origin_features])
+                    y_history = pd.concat(
+                        [y_history, pd.Series([float(value)], index=[origin_date])]
+                    )
+                if fitted is not None and valid_observation:
                     with warnings.catch_warnings():
                         warnings.simplefilter("ignore")
                         fitted = fitted.append(
                             np.asarray([float(value)]),
-                            exog=x_test.loc[[previous]].to_numpy(),
+                            exog=origin_features.to_numpy(),
                             refit=False,
                         )
             if fitted is None or i % self.refit_every == 0:

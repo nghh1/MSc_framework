@@ -6,7 +6,7 @@ changes in response to test performance.
 
 ## Shared prediction and execution contract
 
-Every supervised model forecasts the next trading-day return for one stock. Forecasts are mapped
+Every supervised model forecasts the next five-trading-day return for one stock. Forecasts are mapped
 continuously to `[-1, 1]` using the constrained single-asset mean-variance rule
 `position = clip(predicted_return / (risk_aversion * training_return_variance), -1, 1)`.
 The shared risk-aversion coefficient is fixed at 10 for every model and stock, while variance is
@@ -15,11 +15,14 @@ quadratic expected-utility approximation followed by the experiment's no-leverag
 constraint. It replaces an arbitrary nonlinear signal squashing constant without using test data.
 Deep sequence targets
 are standardised using training-only moments and forecasts are converted back to return units before
-position mapping. Every RL policy selects one of `[-1, 0, 1]`. Each stock controls one fixed
-equal-capital sleeve. RL training and
-backtesting use the same sleeve transition: the current exposure drifts with realised return, the
-next target trades from that drifted exposure, and transaction, slippage, and short-borrow costs are
-deducted before the sleeve returns are averaged. This exact shared contract is more important for
+position mapping. Every RL policy selects an incremental decrease, hold, or increase action. The
+resulting target remains in `{-1, 0, +1}` and is held for five trading days. Each stock controls one
+fixed equal-capital sleeve. RL training and backtesting compound the same five daily sleeve returns:
+transaction cost is charged at scheduled decisions, short-borrow cost is charged daily, and exposure
+drifts between decisions. If drift would breach the `[-1, 1]` exposure limit, the sleeve is forcibly
+deleveraged to the boundary and the resulting turnover is charged at the same transaction-cost rate.
+A sleeve that exhausts its capital is liquidated rather than propagated through a near-zero exposure
+denominator. This exact shared contract is more important for
 fairness than making every model equally large.
 
 The 20-day lookback represents roughly one trading month. Hidden dimensions are deliberately
@@ -33,7 +36,7 @@ to $[3\times10^{-4}, 1.5\times10^{-3}]$, avoiding both near-static and excessive
 
 The LSTM uses two recurrent layers, the final hidden state, and a two-layer point-forecast
 head. LSTM gates provide a direct baseline for persistent and decaying temporal relationships such
-as volatility clustering. The final state is appropriate because the target is one-step-ahead rather
+as volatility clustering. The final state is appropriate because the target is one five-day return rather
 than a sequence. Dropout is fixed at 0.2 between the recurrent layers; the hidden width, learning
 rate, and epochs are selected on inner folds.
 
@@ -49,7 +52,7 @@ contrasts recurrent memory with a parallel, fixed receptive field under a simila
 The conventional encoder-only Transformer uses a linear projection and learned positional encoding,
 followed by two pre-normalised causal Transformer
 encoder blocks with multi-head self-attention, GELU feed-forward layers, and fixed 0.2 dropout. Layer
-normalisation and a linear head map the final token to the one-step return forecast. A decoder is not
+normalisation and a linear head map the final token to the five-day return forecast. A decoder is not
 required because the task produces one value rather than an autoregressive output sequence.
 
 ## Statistical and machine-learning baselines
@@ -66,19 +69,19 @@ required because the task produces one value rather than an autoregressive outpu
 
 ## Non-GARL RL baselines
 
-The state for each stock is the standardised 20-day by 19-feature market window plus its current
-position. The market window remains two-dimensional inside the policy and is encoded by four
+The state for each stock is the standardised 20-day by 20-feature market window plus its current
+target level. The market window remains two-dimensional inside the policy and is encoded by four
 residual causal TCN blocks with 32 channels, kernel size 3, and dilations 1, 2, 4, and 8. Their
-31-observation receptive field covers the complete 20-day lookback. The current drifted position is
+31-observation receptive field covers the complete 20-day lookback. The current target level is
 concatenated after temporal encoding because it is portfolio state rather than a market sequence.
 It is included because transaction costs make the problem state-dependent.
 
 Encoder dropout is fixed at zero. Random feature masking would make PPO's stored and recomputed
 action likelihoods depend on different dropout masks and would therefore distort the clipped
 likelihood ratio. Capacity is instead controlled through the 32-channel bottleneck and causal weight
-sharing. Discrete symmetric actions allow long, flat, and short exposure without giving one RL
-algorithm a different action space. The three-action design reduces exploration complexity for the
-available sample size.
+sharing. Discrete symmetric actions mean decrease one level, hold, and increase one level. Zero is
+therefore a genuine hold action rather than an instruction to liquidate. Direct long-to-short
+reversal takes two decisions, reducing oscillation without changing the three-action budget.
 
 The joint (`single_*`) policy applies one weight-shared TCN encoder to every stock, concatenates the
 nine compact stock representations, shares a two-layer portfolio representation, and uses one action
@@ -95,9 +98,10 @@ transfer knowledge, but avoid negative transfer and provide the cleanest control
   DQN with one Q-value head per stock and a shared representation; it is not an exhaustive joint
   action-value table over all `3^N` portfolio actions.
 
-All RL rewards contain actual execution costs. Inner validation may select a one- or two-times
-turnover penalty during training; two is regularisation only, while evaluation always deducts the
-actual cost exactly once. PPO and DQN are non-GARL baselines and are not presented as GARL variants.
+All RL rewards contain actual execution costs plus a fixed two-times turnover regulariser during
+training; evaluation deducts actual cost exactly once. PPO and DQN are non-GARL baselines and are
+not presented as GARL variants. The configured daily discount is exponentiated by five for each
+five-day transition, preserving the declared calendar-time discount.
 
 ## GARL and DDAL
 
@@ -159,8 +163,8 @@ external dataset.
 
 RL tuning fixes rollout length at 32. Each method evaluates nine predeclared profiles using three
 learning rates from half to twice the declared base rate on the latest embargoed pre-test validation
-segment. Turnover penalisation remains fixed at the actual configured cost multiplier of 1.0, so
-tuning does not optimise against artificial costs that differ from the final backtest. Selective
+segment. Turnover penalisation remains fixed at the configured multiplier of 2.0, so it is not an
+additional tuning dimension. Selective
 GARL uses a balanced three-learning-rate by three-alignment-threshold grid with thresholds
 `{0.0, 0.05, 0.1}`; its entropy weight, peer mixture, and pool size remain fixed at 0.01, 0.5,
 and 3. Original GARL uses a balanced three-learning-rate by three-entropy-weight grid while fixing
@@ -170,8 +174,8 @@ and selected settings are reused for all ten evaluation seeds. The
 TCN structure is fixed rather than added to the tuning search, limiting compute and avoiding another
 layer of model-selection variance.
 
-Every RL method completes 100 rollout epochs of 32 environment interactions, for a fixed
-3,200-interaction budget per environment. Training-reward checkpoint selection is disabled because sequential rollout
+Every RL method completes 100 rollout epochs of 32 five-day decision interactions, for a fixed
+3,200-decision budget per environment. Training-reward checkpoint selection is disabled because sequential rollout
 rewards reflect changing historical regimes and are not a stationary validation criterion. The
 final fixed-step parameters are evaluated. Reward, loss,
 entropy or epsilon where applicable, checkpoint eligibility, asynchronous queue size, and sharing

@@ -17,6 +17,7 @@ from .core import (
     apply_gradient,
     fit_feature_scalers,
     greedy_asset_positions,
+    incremental_target,
     initialise_asset_actor_critics,
     make_states,
 )
@@ -33,6 +34,8 @@ class RLPolicySet:
     cost_rate: float = 0.0
     short_borrow_rate: float = 0.0
     diagnostics: list[dict] = field(default_factory=list)
+    rebalance_threshold: float = 0.0
+    decision_interval: int = 1
 
     def positions(
         self,
@@ -53,6 +56,8 @@ class RLPolicySet:
                 closes[ticker] if closes is not None else None,
                 self.cost_rate,
                 self.short_borrow_rate,
+                self.rebalance_threshold,
+                self.decision_interval,
             )
             for ticker in self.tickers
         }
@@ -79,6 +84,8 @@ def train_independent_a2c(
     entropy_weight: float = 0.01,
     turnover_penalty_multiplier: float = 1.0,
     short_borrow_bps_annual: float = 0.0,
+    rebalance_threshold: float = 0.0,
+    decision_interval: int = 1,
     early_stopping_patience: int = 15,
     early_stopping_min_delta: float = 1e-4,
     minimum_train_epochs: int = 30
@@ -89,7 +96,9 @@ def train_independent_a2c(
     states = make_states(
         features, closes, scalers, levels=levels, lookback=lookback, cost_rate=cost_rate,
         turnover_penalty_multiplier=turnover_penalty_multiplier,
-        short_borrow_bps_annual=short_borrow_bps_annual
+        short_borrow_bps_annual=short_borrow_bps_annual,
+        rebalance_threshold=rebalance_threshold,
+        decision_interval=decision_interval,
     )
     observation_size = features[tickers[0]].shape[1] * lookback + 1
     models = initialise_asset_actor_critics(
@@ -125,7 +134,7 @@ def train_independent_a2c(
                 models[ticker],
                 states[ticker],
                 rollout_length=rollout_length,
-                gamma=gamma,
+                gamma=gamma**decision_interval,
                 rng=randoms[ticker],
                 gae_lambda=gae_lambda,
                 entropy_weight=entropy_weight,
@@ -164,7 +173,9 @@ def train_independent_a2c(
         lookback,
         cost_rate,
         short_borrow_bps_annual / 10000 / 252,
-        diagnostics
+        diagnostics,
+        rebalance_threshold,
+        decision_interval,
     )
 
 
@@ -188,6 +199,8 @@ def train_joint_a2c(
     entropy_weight: float = 0.01,
     turnover_penalty_multiplier: float = 1.0,
     short_borrow_bps_annual: float = 0.0,
+    rebalance_threshold: float = 0.0,
+    decision_interval: int = 1,
     early_stopping_patience: int = 15,
     early_stopping_min_delta: float = 1e-4,
     minimum_train_epochs: int = 30
@@ -198,7 +211,9 @@ def train_joint_a2c(
     states = make_states(
         features, closes, scalers, levels, lookback, cost_rate,
         turnover_penalty_multiplier=turnover_penalty_multiplier,
-        short_borrow_bps_annual=short_borrow_bps_annual
+        short_borrow_bps_annual=short_borrow_bps_annual,
+        rebalance_threshold=rebalance_threshold,
+        decision_interval=decision_interval,
     )
     per_asset_size = features[tickers[0]].shape[1] * lookback + 1
     torch.manual_seed(seed)
@@ -254,8 +269,9 @@ def train_joint_a2c(
         for i in reversed(range(len(advantages))):
             mask = 0.0 if done_buffer[i] else 1.0
             following_value = next_value if i == len(advantages) - 1 else value_buffer[i + 1]
-            delta = reward_buffer[i] + gamma * following_value * mask - value_buffer[i]
-            running_advantage = delta + gamma * gae_lambda * mask * running_advantage
+            discount = gamma**decision_interval
+            delta = reward_buffer[i] + discount * following_value * mask - value_buffer[i]
+            running_advantage = delta + discount * gae_lambda * mask * running_advantage
             advantages[i] = running_advantage
         returns = advantages + np.asarray(value_buffer, dtype=np.float32)
         return_tensor = torch.tensor(returns, device=device)
@@ -303,7 +319,9 @@ def train_joint_a2c(
         lookback,
         cost_rate,
         short_borrow_bps_annual / 10000 / 252,
-        diagnostics
+        diagnostics,
+        rebalance_threshold,
+        decision_interval,
     )
 
 
@@ -328,12 +346,10 @@ def joint_positions(
     current = {ticker: 0.0 for ticker in policy.tickers}
     rows = []
     index = features[policy.tickers[0]].index
-    aligned_closes = (
-        {ticker: closes[ticker].reindex(index) for ticker in policy.tickers}
-        if closes is not None
-        else None
-    )
     for step, date in enumerate(index):
+        if step % policy.decision_interval != 0:
+            rows.append(dict(current))
+            continue
         observations = []
         for ticker in policy.tickers:
             i = locations[ticker][date]
@@ -350,22 +366,9 @@ def joint_positions(
         actions = torch.argmax(logits.squeeze(0), dim=-1).cpu().numpy()
         row = {}
         for ticker, action in zip(policy.tickers, actions):
-            current[ticker] = float(policy.levels[action])
+            current[ticker] = incremental_target(
+                current[ticker], action, np.asarray(policy.levels, dtype=float)
+            )
             row[ticker] = current[ticker]
         rows.append(row)
-        if aligned_closes is not None and step + 1 < len(index):
-            for ticker in policy.tickers:
-                next_return = float(
-                    aligned_closes[ticker].iloc[step + 1]
-                    / aligned_closes[ticker].iloc[step]
-                    - 1
-                )
-                target = row[ticker]
-                previous = observations[policy.tickers.index(ticker)][-1]
-                reward = (
-                    target * next_return
-                    - abs(target - previous) * policy.cost_rate
-                    - max(-target, 0.0) * policy.short_borrow_rate
-                )
-                current[ticker] = target * (1 + next_return) / max(1 + reward, 1e-8)
     return pd.DataFrame(rows, index=index)

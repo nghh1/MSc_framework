@@ -26,7 +26,7 @@ class MarketDataset:
         )
 
 
-def build_dataset(raw: dict[str, pd.DataFrame], horizon: int = 1) -> MarketDataset:
+def build_dataset(raw: dict[str, pd.DataFrame], horizon: int = 5) -> MarketDataset:
     features = {ticker: build_features(frame, horizon) for ticker, frame in raw.items()}
     common = None
     for ticker, frame in features.items():

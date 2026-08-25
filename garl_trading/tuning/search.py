@@ -56,6 +56,9 @@ def tune_forecaster(
     transaction_cost_bps: float,
     slippage_bps: float,
     short_borrow_bps_annual: float,
+    rebalance_threshold: float = 0.0,
+    decision_interval: int = 1,
+    target_horizon: int = 1,
     risk_aversion: float = 10.0,
     objective_metric: str = "sharpe",
 ) -> dict:
@@ -70,7 +73,9 @@ def tune_forecaster(
                 model.fit(features.iloc[fold.train], targets.iloc[fold.train])
                 context_positions = np.arange(max(0, fold.test[0] - 19), fold.test[0])
                 context = ModelContext(
-                    features.iloc[context_positions], targets.iloc[context_positions]
+                    features.iloc[context_positions],
+                    targets.iloc[context_positions],
+                    target_horizon=target_horizon,
                 )
                 test_features = features.iloc[fold.test]
                 test_targets = targets.iloc[fold.test]
@@ -86,6 +91,8 @@ def tune_forecaster(
                     transaction_cost_bps=transaction_cost_bps,
                     slippage_bps=slippage_bps,
                     short_borrow_bps_annual=short_borrow_bps_annual,
+                    rebalance_threshold=rebalance_threshold,
+                    decision_interval=decision_interval,
                 )
                 score = result.metrics[objective_metric]
                 scores.append(score if np.isfinite(score) else -10.0)

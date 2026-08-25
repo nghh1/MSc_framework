@@ -20,6 +20,7 @@ python3.11 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip setuptools wheel
 python -m pip install ".[dev]"
+python -m pip install --force-reinstall --no-deps .
 python -m pytest
 ```
 
@@ -30,6 +31,7 @@ py -3.11 -m venv .venv
 .venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip setuptools wheel
 python -m pip install ".[dev]"
+python -m pip install --force-reinstall --no-deps .
 python -m pytest
 ```
 
@@ -48,9 +50,11 @@ sufficient for CPU and supported Apple Silicon environments.
 1. Activate the environment and run the tests.
 2. Copy `configs/default.toml` to a named dissertation configuration and freeze tickers, dates,
    the zero risk-free-rate assumption, the 50-bps annual short-borrow assumption, costs, 10 seeds, folds,
-   the nine predeclared family-specific RL profiles, fixed 32-step RL rollout, causal TCN encoder, three action
-   levels, fixed-step training settings,
-   selective-GARL alignment candidates, actual-cost turnover penalty, and device before looking at
+   the nine predeclared family-specific RL profiles, fixed 32-decision RL rollout, causal TCN encoder,
+   incremental decrease/hold/increase actions, five-day target and decision interval, fixed-step
+   training settings, common no-trade band, selective-GARL alignment candidates, two-times turnover
+   training regularisation, the daily `[-1, 1]` exposure constraint with costed forced deleveraging,
+   and device before looking at
    final-holdout results.
 3. Run the full experiment:
 
@@ -67,7 +71,7 @@ sufficient for CPU and supported Apple Silicon environments.
    ```
 
 7. Archive the run's `manifest.json`, copied `config.toml`, price snapshot, selected tuning
-   parameters, metrics, positions, daily returns, training diagnostics, and report together. Never
+   parameters, metrics, positions, executed trades, daily returns, training diagnostics, and report together. Never
    merge tables from different run IDs.
 
 The default experiment is computationally expensive because tuning is nested inside outer folds and
@@ -86,8 +90,8 @@ Nine RL trials exhaust a compact family-specific profile set: A2C varies learnin
 PPO varies learning rate and clipping; DQN varies learning rate, exploration decay, and target
 updates; GARL varies learning rate and entropy; selective GARL varies learning rate and tests
 low-positive and stricter alignment gates. Both GARL variants use a fixed recent-peer pool size of
-three. Every family fixes the turnover training penalty at the actual configured cost multiplier of
-1.0, matching evaluation costs. Rollout length remains fixed at 32. Ten RL seeds balance
+three. Every family fixes the turnover training penalty at 2.0 while evaluation charges actual costs
+once. Rollout length remains fixed at 32 five-day decisions. Ten RL seeds balance
 stochastic uncertainty estimation against computation. Run a one-seed smoke
 configuration first, but retain all 10 predeclared seeds for the dissertation run.
 

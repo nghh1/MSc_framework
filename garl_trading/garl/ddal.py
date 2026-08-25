@@ -170,6 +170,8 @@ def train_garl_ddal(
     share_every: int = 4,
     pool_size: int | None = None,
     short_borrow_bps_annual: float = 0.0,
+    rebalance_threshold: float = 0.0,
+    decision_interval: int = 1,
     early_stopping_patience: int = 15,
     early_stopping_min_delta: float = 1e-4,
     minimum_train_epochs: int = 30,
@@ -191,7 +193,9 @@ def train_garl_ddal(
     states = make_states(
         features, closes, scalers, levels=levels, lookback=lookback, cost_rate=cost_rate,
         turnover_penalty_multiplier=turnover_penalty_multiplier,
-        short_borrow_bps_annual=short_borrow_bps_annual
+        short_borrow_bps_annual=short_borrow_bps_annual,
+        rebalance_threshold=rebalance_threshold,
+        decision_interval=decision_interval,
     )
     observation_size = features[tickers[0]].shape[1] * lookback + 1
     models = initialise_asset_actor_critics(
@@ -242,7 +246,7 @@ def train_garl_ddal(
             models[ticker],
             states[ticker],
             rollout_length=rollout_length,
-            gamma=gamma,
+            gamma=gamma**decision_interval,
             rng=randoms[ticker],
             gae_lambda=gae_lambda,
             entropy_weight=entropy_weight,
@@ -342,7 +346,9 @@ def train_garl_ddal(
         lookback,
         cost_rate,
         short_borrow_bps_annual / 10000 / 252,
-        diagnostics
+        diagnostics,
+        rebalance_threshold,
+        decision_interval,
     )
 
 

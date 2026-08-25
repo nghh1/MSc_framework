@@ -172,6 +172,8 @@ def train_independent_dqn(
     target_update_interval: int = 10,
     turnover_penalty_multiplier: float = 1.0,
     short_borrow_bps_annual: float = 0.0,
+    rebalance_threshold: float = 0.0,
+    decision_interval: int = 1,
     early_stopping_patience: int = 15,
     early_stopping_min_delta: float = 1e-4,
     minimum_train_epochs: int = 30
@@ -184,7 +186,9 @@ def train_independent_dqn(
     states = make_states(
         features, closes, scalers, levels=levels, lookback=lookback, cost_rate=cost_rate,
         turnover_penalty_multiplier=turnover_penalty_multiplier,
-        short_borrow_bps_annual=short_borrow_bps_annual
+        short_borrow_bps_annual=short_borrow_bps_annual,
+        rebalance_threshold=rebalance_threshold,
+        decision_interval=decision_interval,
     )
     observation_size = features[tickers[0]].shape[1] * lookback + 1
     models, targets, optimizers, buffers, randoms = {}, {}, {}, {}, {}
@@ -242,7 +246,7 @@ def train_independent_dqn(
                             targets[ticker],
                             optimizers[ticker],
                             buffers[ticker].sample(64),
-                            gamma
+                            gamma**decision_interval
                         )
                     )
         if (epoch + 1) % target_update_interval == 0:
@@ -277,7 +281,9 @@ def train_independent_dqn(
         lookback,
         cost_rate,
         short_borrow_bps_annual / 10000 / 252,
-        diagnostics
+        diagnostics,
+        rebalance_threshold,
+        decision_interval,
     )
 
 
@@ -301,6 +307,8 @@ def train_joint_dqn(
     target_update_interval: int = 10,
     turnover_penalty_multiplier: float = 1.0,
     short_borrow_bps_annual: float = 0.0,
+    rebalance_threshold: float = 0.0,
+    decision_interval: int = 1,
     early_stopping_patience: int = 15,
     early_stopping_min_delta: float = 1e-4,
     minimum_train_epochs: int = 30
@@ -314,6 +322,8 @@ def train_joint_dqn(
         features, closes, scalers, levels=levels, lookback=lookback, cost_rate=cost_rate,
         turnover_penalty_multiplier=turnover_penalty_multiplier,
         short_borrow_bps_annual=short_borrow_bps_annual,
+        rebalance_threshold=rebalance_threshold,
+        decision_interval=decision_interval,
     )
     per_asset_size = features[tickers[0]].shape[1] * lookback + 1
     torch.manual_seed(seed)
@@ -390,7 +400,10 @@ def train_joint_dqn(
                 with torch.no_grad():
                     next_actions = model(next_observations).argmax(axis=-1, keepdim=True)
                     future = target(next_observations).gather(2, next_actions).squeeze(-1)
-                    expected = rewards_tensor[:, None] + gamma * future * (1 - done_tensor[:, None])
+                    expected = (
+                        rewards_tensor[:, None]
+                        + gamma**decision_interval * future * (1 - done_tensor[:, None])
+                    )
                 loss = nn.functional.smooth_l1_loss(predicted, expected)
                 optimizer.zero_grad()
                 loss.backward()
@@ -428,5 +441,7 @@ def train_joint_dqn(
         lookback,
         cost_rate,
         short_borrow_bps_annual / 10000 / 252,
-        diagnostics
+        diagnostics,
+        rebalance_threshold,
+        decision_interval,
     )

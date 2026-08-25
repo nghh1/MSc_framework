@@ -12,7 +12,7 @@ from garl_trading.rl import (
     train_joint_dqn,
     train_joint_ppo,
 )
-from garl_trading.rl.core import RewardEarlyStopper, TemporalFeatureExtractor
+from garl_trading.rl.core import RewardEarlyStopper, TemporalFeatureExtractor, TradingState
 from garl_trading.rl.dqn import Transition, independent_update
 from garl_trading.tuning.rl_search import rl_candidate_profiles
 
@@ -66,6 +66,7 @@ def test_joint_a2c_ppo_and_dqn_and_independent_ppo_dqn_emit_position_matrices():
         "gamma": 0.95,
         "cost_rate": 0.0007,
         "seed": 4,
+        "decision_interval": 5,
     }
     for trainer in (
         train_joint_a2c,
@@ -78,6 +79,7 @@ def test_joint_a2c_ppo_and_dqn_and_independent_ppo_dqn_emit_position_matrices():
         positions = policy.positions(test_features, context=context)
         assert positions.shape == (5, 2)
         assert positions.abs().max().max() <= 1
+        assert (positions.nunique() <= 1).all()
         models = policy.models.values() if isinstance(policy.models, dict) else (policy.models,)
         assert all(hasattr(model, "extractor") for model in models)
 
@@ -183,6 +185,29 @@ def test_double_dqn_uses_online_action_and_target_value_with_huber_loss():
     assert np.isclose(loss, 0.5)
 
 
+def test_incremental_hold_action_and_five_day_transition_compound_returns():
+    state = TradingState.create(
+        np.zeros((7, 1), dtype=np.float32),
+        np.asarray([100.0, 110.0, 121.0, 121.0, 121.0, 121.0, 121.0]),
+        np.asarray([-1.0, 0.0, 1.0]),
+        lookback=1,
+        cost_rate=0.0,
+        short_borrow_rate=0.0,
+        decision_interval=2,
+    )
+    _, reward, done = state.step(2)
+    assert not done
+    assert np.isclose(reward, 0.21)
+    assert state.cursor == 2
+    assert state.target_position == 1.0
+    assert state.observation()[-1] == 1.0
+
+    state.step(1)
+    assert state.target_position == 1.0
+    state.step(0)
+    assert state.target_position == 0.0
+
+
 def test_rl_tuning_profiles_are_bounded_and_include_low_positive_selective_garl_gate():
     for name in (
         "single_a2c",
@@ -196,7 +221,7 @@ def test_rl_tuning_profiles_are_bounded_and_include_low_positive_selective_garl_
     ):
         profiles = rl_candidate_profiles(name, 3e-4)
         assert len(profiles) == 9
-        assert {profile["turnover_penalty_multiplier"] for profile in profiles} == {1.0}
+        assert {profile["turnover_penalty_multiplier"] for profile in profiles} == {2.0}
     selective = rl_candidate_profiles("selective_garl_ddal", 3e-4)
     garl = rl_candidate_profiles("garl_ddal", 3e-4)
     assert {profile["pool_size"] for profile in garl + selective} == {3}

@@ -27,7 +27,7 @@ def rl_candidate_profiles(name: str, learning_rate: float) -> list[dict[str, flo
             {
                 "learning_rate": rates[index % 3],
                 "entropy_weight": entropy[index // 3],
-                "turnover_penalty_multiplier": 1.0,
+                "turnover_penalty_multiplier": 2.0,
             }
             for index in range(9)
         ]
@@ -37,7 +37,7 @@ def rl_candidate_profiles(name: str, learning_rate: float) -> list[dict[str, flo
             {
                 "learning_rate": rates[index % 3],
                 "clip_epsilon": clipping[index // 3],
-                "turnover_penalty_multiplier": 1.0,
+                "turnover_penalty_multiplier": 2.0,
             }
             for index in range(9)
         ]
@@ -49,7 +49,7 @@ def rl_candidate_profiles(name: str, learning_rate: float) -> list[dict[str, flo
                 "learning_rate": rates[index % 3],
                 "epsilon_decay_fraction": exploration[index // 3],
                 "target_update_interval": target_intervals[(index + index // 3) % 3],
-                "turnover_penalty_multiplier": 1.0,
+                "turnover_penalty_multiplier": 2.0,
             }
             for index in range(9)
         ]
@@ -60,7 +60,7 @@ def rl_candidate_profiles(name: str, learning_rate: float) -> list[dict[str, flo
                 "learning_rate": rates[index % 3],
                 "entropy_weight": entropy[index // 3],
                 "pool_size": 3,
-                "turnover_penalty_multiplier": 1.0,
+                "turnover_penalty_multiplier": 2.0,
             }
             for index in range(9)
         ]
@@ -73,7 +73,7 @@ def rl_candidate_profiles(name: str, learning_rate: float) -> list[dict[str, flo
                 "alignment_threshold": thresholds[index // 3],
                 "peer_mix": 0.5,
                 "pool_size": 3,
-                "turnover_penalty_multiplier": 1.0,
+                "turnover_penalty_multiplier": 2.0,
             }
             for index in range(9)
         ]
@@ -97,6 +97,8 @@ def tune_rl_policy(
     transaction_cost_bps: float,
     slippage_bps: float,
     short_borrow_bps_annual: float,
+    rebalance_threshold: float,
+    decision_interval: int,
     embargo_bars: int,
     early_stopping_patience: int,
     early_stopping_min_delta: float,
@@ -176,6 +178,8 @@ def tune_rl_policy(
                 encoder_dilations=encoder_dilations,
                 encoder_dropout=encoder_dropout,
                 short_borrow_bps_annual=short_borrow_bps_annual,
+                rebalance_threshold=rebalance_threshold,
+                decision_interval=decision_interval,
                 early_stopping_patience=min(early_stopping_patience, tune_epochs),
                 early_stopping_min_delta=early_stopping_min_delta,
                 minimum_train_epochs=min(minimum_train_epochs, tune_epochs),
@@ -192,7 +196,9 @@ def tune_rl_policy(
                 initial_capital,
                 transaction_cost_bps,
                 slippage_bps=slippage_bps,
-                short_borrow_bps_annual=short_borrow_bps_annual
+                short_borrow_bps_annual=short_borrow_bps_annual,
+                rebalance_threshold=rebalance_threshold,
+                decision_interval=decision_interval,
             )
             score = result.metrics[objective_metric]
             return float(score) if np.isfinite(score) else -10.0

@@ -36,3 +36,14 @@ def test_adx_and_roc_are_finite_causal_features():
     assert features["adx_14"].dropna().between(0, 1).all()
     expected_roc = raw["close"].pct_change(20, fill_method=None)
     pd.testing.assert_series_equal(features["roc_20"], expected_roc, check_names=False)
+
+
+def test_five_day_target_and_trailing_range_position_are_causal_and_interpretable():
+    raw = market_fixture(("AAA",), periods=300, seed=13)["AAA"]
+    features = build_features(raw, horizon=5)
+    expected_target = raw["close"].shift(-5) / raw["close"] - 1
+    pd.testing.assert_series_equal(
+        features["target_return"], expected_target, check_names=False
+    )
+    assert "range_position_20" in FEATURE_COLUMNS
+    assert features["range_position_20"].dropna().between(0, 1).all()
