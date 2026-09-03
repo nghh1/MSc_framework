@@ -4,14 +4,8 @@ from conftest import market_fixture
 
 from garl_trading.data import build_dataset
 from garl_trading.data.features import FEATURE_COLUMNS
-from garl_trading.rl import (
-    train_independent_a2c,
-    train_independent_dqn,
-    train_independent_ppo,
-    train_joint_a2c,
-    train_joint_dqn,
-    train_joint_ppo,
-)
+from garl_trading.rl import (train_independent_a2c, train_independent_dqn, train_independent_ppo,
+                             train_joint_a2c, train_joint_dqn, train_joint_ppo)
 from garl_trading.rl.core import RewardEarlyStopper, TemporalFeatureExtractor, TradingState
 from garl_trading.rl.dqn import Transition, independent_update
 from garl_trading.tuning.rl_search import rl_candidate_profiles
@@ -23,8 +17,7 @@ def test_rl_temporal_extractor_is_causal_and_preserves_position_state():
         observation_size=20 * 3 + 1,
         lookback=20,
         channels=8,
-        dropout=0.0,
-    ).eval()
+        dropout=0.0).eval()
     original = torch.randn(1, 20, 3)
     changed = original.clone()
     changed[:, 12:, :] += 100
@@ -66,7 +59,7 @@ def test_joint_a2c_ppo_and_dqn_and_independent_ppo_dqn_emit_position_matrices():
         "gamma": 0.95,
         "cost_rate": 0.0007,
         "seed": 4,
-        "decision_interval": 5,
+        "decision_interval": 5
     }
     for trainer in (
         train_joint_a2c,
@@ -89,8 +82,7 @@ def test_early_stopping_checkpointing_starts_after_minimum_epochs():
     stopper = RewardEarlyStopper(
         patience=2,
         min_delta=0.0,
-        minimum_epochs=3,
-    )
+        minimum_epochs=3)
 
     assert not stopper.update(0, 1.0, model)
     assert not stopper.update(1, 0.0, model)
@@ -154,8 +146,7 @@ def test_independent_a2c_retains_per_agent_training_diagnostics():
         learning_rate=3e-4,
         gamma=0.95,
         cost_rate=0.0007,
-        seed=4,
-    )
+        seed=4)
 
     assert {row["agent"] for row in policy.diagnostics} == {"AAA", "BBB"}
 
@@ -178,8 +169,7 @@ def test_double_dqn_uses_online_action_and_target_value_with_huber_loss():
             0,
             0.0,
             np.array([1.0], dtype=np.float32),
-            False,
-        )
+            False)
     ]
     loss = independent_update(online, target, optimizer, batch, gamma=1.0)
     assert np.isclose(loss, 0.5)
@@ -193,8 +183,7 @@ def test_incremental_hold_action_and_five_day_transition_compound_returns():
         lookback=1,
         cost_rate=0.0,
         short_borrow_rate=0.0,
-        decision_interval=2,
-    )
+        decision_interval=2)
     _, reward, done = state.step(2)
     assert not done
     assert np.isclose(reward, 0.21)

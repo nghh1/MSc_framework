@@ -4,17 +4,10 @@ from conftest import market_fixture
 
 from garl_trading.data import build_dataset
 from garl_trading.data.features import FEATURE_COLUMNS
-from garl_trading.garl.ddal import (
-    GradientPiece,
-    gradient_cosine_similarity,
-    latest_peer_pieces,
-    positive_return_relevance,
-    return_relevance,
-    selective_weighted_average,
-    train_garl_ddal,
-    train_selective_garl_ddal,
-    weighted_average,
-)
+from garl_trading.garl.ddal import (GradientPiece, gradient_cosine_similarity, latest_peer_pieces,
+                                    positive_return_relevance, return_relevance,
+                                    selective_weighted_average, train_garl_ddal,
+                                    train_selective_garl_ddal, weighted_average)
 from garl_trading.rl.core import initialise_asset_actor_critics
 
 
@@ -42,7 +35,7 @@ def test_selective_relevance_rejects_negative_return_correlation():
     index = pd.bdate_range("2020-01-01", periods=5)
     closes = {
         "A": pd.Series([100, 101, 103, 102, 105], index=index),
-        "B": pd.Series([100, 99, 97, 98, 95], index=index),
+        "B": pd.Series([100, 99, 97, 98, 95], index=index)
     }
     relevance = positive_return_relevance(closes)
     assert relevance[("A", "A")] == 1.0
@@ -56,8 +49,7 @@ def test_selective_average_rejects_conflicting_peer_gradient():
     averaged, diagnostics = selective_weighted_average(
         local,
         [aligned, conflicting],
-        alignment_threshold=0.0,
-    )
+        alignment_threshold=0.0)
     assert gradient_cosine_similarity(local.gradients, aligned.gradients) == 1.0
     assert gradient_cosine_similarity(local.gradients, conflicting.gradients) == -1.0
     assert diagnostics["peer_candidates"] == 2
@@ -100,11 +92,9 @@ def test_garl_queue_keeps_only_latest_gradient_from_each_source():
 
 def test_garl_and_independent_ablation_share_reproducible_initialisation_contract():
     first = initialise_asset_actor_critics(
-        ("A", "B"), 5, 2, 42, torch.device("cpu"), lookback=2
-    )
+        ("A", "B"), 5, 2, 42, torch.device("cpu"), lookback=2)
     second = initialise_asset_actor_critics(
-        ("A", "B"), 5, 2, 42, torch.device("cpu"), lookback=2
-    )
+        ("A", "B"), 5, 2, 42, torch.device("cpu"), lookback=2)
     first_a = next(first["A"].parameters())
     first_b = next(first["B"].parameters())
     second_a = next(second["A"].parameters())
@@ -135,8 +125,7 @@ def test_garl_checkpoints_become_eligible_only_after_shared_updates():
         seed=4,
         share_after_fraction=0.25,
         share_every=2,
-        minimum_train_epochs=1,
-    )
+        minimum_train_epochs=1)
 
     for agent in dataset.tickers:
         rows = [row for row in policy.diagnostics if row["agent"] == agent]
@@ -172,8 +161,7 @@ def test_selective_garl_records_knowledge_acceptance_diagnostics():
         seed=4,
         share_after_fraction=0.25,
         share_every=2,
-        minimum_train_epochs=1,
-    )
+        minimum_train_epochs=1)
     selection_rows = [row for row in policy.diagnostics if "peer_candidates" in row]
     assert selection_rows
     assert all(row["peer_accepted"] <= row["peer_candidates"] for row in selection_rows)

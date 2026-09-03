@@ -5,12 +5,8 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from garl_trading.execution import (
-    bounded_exposure,
-    drifted_exposure,
-    limited_net_return,
-    thresholded_target,
-)
+from garl_trading.execution import (bounded_exposure, drifted_exposure, limited_net_return,
+                                    thresholded_target)
 
 from .metrics import summarise
 
@@ -37,7 +33,7 @@ TRADE_COLUMNS = [
     "executed_change",
     "execution_price",
     "transaction_cost",
-    "short_borrow_cost",
+    "short_borrow_cost"
 ]
 
 
@@ -45,16 +41,9 @@ def trade_frame(records: list[dict]) -> pd.DataFrame:
     return pd.DataFrame(records, columns=TRADE_COLUMNS)
 
 
-def finish_result(
-    initial_capital: float,
-    net_returns: pd.Series,
-    gross_returns: pd.Series,
-    held_weights: pd.DataFrame,
-    cash_exposure: pd.Series,
-    turnover: pd.Series,
-    costs: pd.Series,
-    trades: pd.DataFrame,
-) -> PortfolioResult:
+def finish_result(initial_capital: float, net_returns: pd.Series, gross_returns: pd.Series,
+                  held_weights: pd.DataFrame, cash_exposure: pd.Series, turnover: pd.Series,
+                  costs: pd.Series, trades: pd.DataFrame) -> PortfolioResult:
     assets = max(1, held_weights.shape[1])
     held_positions = held_weights * assets
     equity = initial_capital * (1 + net_returns).cumprod()
@@ -65,8 +54,7 @@ def finish_result(
         turnover,
         gross_returns=gross_returns,
         costs=costs,
-        cash_exposure=cash_exposure
-    )
+        cash_exposure=cash_exposure)
     return PortfolioResult(
         equity,
         net_returns,
@@ -77,20 +65,13 @@ def finish_result(
         turnover,
         costs,
         trades,
-        metrics
-    )
+        metrics)
 
 
-def run_portfolio(
-    closes: pd.DataFrame,
-    target_positions: pd.DataFrame,
-    initial_capital: float,
-    transaction_cost_bps: float,
-    slippage_bps: float,
-    short_borrow_bps_annual: float = 0.0,
-    rebalance_threshold: float = 0.0,
-    decision_interval: int = 1,
-) -> PortfolioResult:
+def run_portfolio(closes: pd.DataFrame, target_positions: pd.DataFrame, initial_capital: float,
+                  transaction_cost_bps: float, slippage_bps: float,
+                  short_borrow_bps_annual: float = 0.0, rebalance_threshold: float = 0.0,
+                  decision_interval: int = 1) -> PortfolioResult:
     """Execute delayed targets only on scheduled decision dates."""
     closes = closes.astype(float).sort_index()
     if closes.empty or not np.isfinite(closes.to_numpy()).all() or (closes <= 0).any().any():
@@ -119,8 +100,7 @@ def run_portfolio(
         decision_due = step > 0 and (step - 1) % decision_interval == 0
         proposed = (
             thresholded_target(
-                executed_positions.loc[date], pretrade_positions, rebalance_threshold
-            )
+                executed_positions.loc[date], pretrade_positions, rebalance_threshold)
             if decision_due
             else pretrade_positions.copy()
         )
@@ -149,13 +129,12 @@ def run_portfolio(
                     "executed_change": float(desired[ticker] - pretrade_positions[ticker]),
                     "execution_price": float(closes.loc[date, ticker]),
                     "transaction_cost": float(transaction_cost[ticker] / closes.shape[1]),
-                    "short_borrow_cost": float(borrow_cost[ticker] / closes.shape[1]),
+                    "short_borrow_cost": float(borrow_cost[ticker] / closes.shape[1])
                 }
             )
 
         pretrade_positions = drifted_exposure(
-            desired, asset_returns.loc[date], sleeve_gross
-        )
+            desired, asset_returns.loc[date], sleeve_gross)
         pretrade_positions = pretrade_positions.where(sleeve_net > -1.0, 0.0)
         if (
             not np.isfinite([gross_return, net_return, turnover, total_cost]).all()
@@ -183,16 +162,12 @@ def run_portfolio(
         cash_exposure=cash,
         turnover=turnover,
         costs=costs,
-        trades=trade_frame(trade_records),
+        trades=trade_frame(trade_records)
     )
 
 
-def run_buy_and_hold(
-    closes: pd.DataFrame,
-    initial_capital: float,
-    transaction_cost_bps: float,
-    slippage_bps: float
-) -> PortfolioResult:
+def run_buy_and_hold(closes: pd.DataFrame, initial_capital: float, transaction_cost_bps: float,
+                     slippage_bps: float) -> PortfolioResult:
     """Allocate equal capital once, retain fixed shares, and allow portfolio weights to drift."""
     closes = closes.astype(float).sort_index()
     asset_returns = closes.pct_change(fill_method=None).fillna(0.0)
@@ -232,7 +207,7 @@ def run_buy_and_hold(
                     "executed_change": float(changes[ticker] * closes.shape[1]),
                     "execution_price": float(closes.loc[date, ticker]),
                     "transaction_cost": float(abs(changes[ticker]) * cost_rate),
-                    "short_borrow_cost": 0.0,
+                    "short_borrow_cost": 0.0
                 }
             )
 
@@ -259,16 +234,12 @@ def run_buy_and_hold(
         cash_exposure=cash,
         turnover=turnover,
         costs=costs,
-        trades=trade_frame(trade_records),
+        trades=trade_frame(trade_records)
     )
 
 
-def run_equal_weight_rebalanced(
-    closes: pd.DataFrame,
-    initial_capital: float,
-    transaction_cost_bps: float,
-    slippage_bps: float,
-) -> PortfolioResult:
+def run_equal_weight_rebalanced(closes: pd.DataFrame, initial_capital: float,
+                                transaction_cost_bps: float, slippage_bps: float) -> PortfolioResult:
     """Rebalance to equal portfolio weights daily and charge drift-induced turnover."""
     closes = closes.astype(float).sort_index()
     asset_returns = closes.pct_change(fill_method=None).fillna(0.0)
@@ -302,7 +273,7 @@ def run_equal_weight_rebalanced(
                     "executed_change": float(changes[ticker] * closes.shape[1]),
                     "execution_price": float(closes.loc[date, ticker]),
                     "transaction_cost": float(abs(changes[ticker]) * cost_rate),
-                    "short_borrow_cost": 0.0,
+                    "short_borrow_cost": 0.0
                 }
             )
 
@@ -324,5 +295,5 @@ def run_equal_weight_rebalanced(
         cash_exposure=pd.Series(cash_values, index=closes.index, name="cash_exposure"),
         turnover=pd.Series(turnover_values, index=closes.index, name="turnover"),
         costs=pd.Series(cost_values, index=closes.index, name="cost"),
-        trades=trade_frame(trade_records),
+        trades=trade_frame(trade_records)
     )

@@ -12,14 +12,8 @@ from garl_trading.data import build_dataset, load_market_data
 from garl_trading.data.features import FEATURE_COLUMNS
 from garl_trading.garl import train_garl_ddal, train_selective_garl_ddal
 from garl_trading.models import ModelContext, create_forecaster
-from garl_trading.rl import (
-    train_independent_a2c,
-    train_independent_dqn,
-    train_independent_ppo,
-    train_joint_a2c,
-    train_joint_dqn,
-    train_joint_ppo,
-)
+from garl_trading.rl import (train_independent_a2c, train_independent_dqn, train_independent_ppo,
+                             train_joint_a2c, train_joint_dqn, train_joint_ppo)
 from garl_trading.tuning import tune_forecaster, tune_rl_policy
 from garl_trading.validation import nested_folds, outer_folds
 
@@ -38,8 +32,7 @@ class ExperimentRunner:
         cfg = self.config
         tickers = cfg.data.tickers
         raw = load_market_data(
-            tickers, cfg.data.start, cfg.data.end, adjust_prices=cfg.data.adjust_prices
-        )
+            tickers, cfg.data.start, cfg.data.end, adjust_prices=cfg.data.adjust_prices)
         dataset = build_dataset(raw, horizon=cfg.data.target_horizon)
         min_train = min(cfg.validation.min_train_bars, max(252, len(dataset.index) // 3))
         folds, holdout = outer_folds(
@@ -49,8 +42,7 @@ class ExperimentRunner:
             max_train_bars=cfg.validation.max_train_bars,
             embargo=cfg.validation.embargo_bars,
             holdout_start=cfg.validation.final_holdout_start,
-            use_holdout=cfg.validation.use_final_holdout,
-        )
+            use_holdout=cfg.validation.use_final_holdout)
         evaluation_folds = folds + ([holdout] if holdout is not None else [])
         store = ArtifactStore(cfg.experiment.artifacts_dir, cfg.experiment.name)
         store.initialise(cfg, self.config_path)
@@ -75,8 +67,7 @@ class ExperimentRunner:
         build_report(
             store.path,
             confidence=cfg.reporting.confidence_level,
-            formats=cfg.reporting.formats,
-        )
+            formats=cfg.reporting.formats)
         return store.path
 
     def frames(self, dataset, positions):
@@ -100,7 +91,7 @@ class ExperimentRunner:
             slippage_bps=cfg.slippage_bps,
             short_borrow_bps_annual=cfg.short_borrow_bps_annual,
             rebalance_threshold=cfg.rebalance_threshold,
-            decision_interval=cfg.decision_interval,
+            decision_interval=cfg.decision_interval
         )
 
     def metadata(self, name, fold, repetition, seed):
@@ -113,7 +104,7 @@ class ExperimentRunner:
             "train_start": fold.train_start,
             "train_end": fold.train_end,
             "test_start": fold.test_start,
-            "test_end": fold.test_end,
+            "test_end": fold.test_end
         }
 
     def save_result(self, store, metadata, positions, result):
@@ -127,8 +118,7 @@ class ExperimentRunner:
             costs=result.costs,
             turnover=result.turnover,
             cash_exposure=result.cash_exposure,
-            trades=result.trades,
-        )
+            trades=result.trades)
 
     def run_benchmarks(self, dataset, fold, store):
         _, closes = self.frames(dataset, fold.test)
@@ -138,36 +128,31 @@ class ExperimentRunner:
             close_frame,
             initial_capital=execution.initial_capital,
             transaction_cost_bps=execution.transaction_cost_bps,
-            slippage_bps=execution.slippage_bps,
-        )
+            slippage_bps=execution.slippage_bps)
         self.save_result(
             store,
             self.metadata("buy_and_hold", fold, 0, self.config.experiment.seed),
             buy_hold.held_positions,
-            buy_hold,
-        )
+            buy_hold)
 
         result = run_equal_weight_rebalanced(
             close_frame,
             initial_capital=execution.initial_capital,
             transaction_cost_bps=execution.transaction_cost_bps,
-            slippage_bps=execution.slippage_bps,
-        )
+            slippage_bps=execution.slippage_bps)
         positions = result.held_positions
         self.save_result(
             store,
             self.metadata("equal_weight_rebalanced", fold, 0, self.config.experiment.seed),
             positions,
-            result,
-        )
+            result)
 
     def run_supervised(self, name, dataset, fold, store):
         cfg = self.config
         train_features, _ = self.frames(dataset, fold.train)
         test_features, test_closes = self.frames(dataset, fold.test)
         context_positions = np.arange(
-            max(0, int(fold.test[0]) - cfg.models.lookback + 1), int(fold.test[0])
-        )
+            max(0, int(fold.test[0]) - cfg.models.lookback + 1), int(fold.test[0]))
         context_features, _ = self.frames(dataset, context_positions)
         position_columns = {}
         prediction_columns = {}
@@ -182,11 +167,9 @@ class ExperimentRunner:
                         dataset.index,
                         n_folds=cfg.validation.inner_folds,
                         min_train_bars=min(
-                            cfg.validation.min_train_bars, max(126, len(fold.train) // 3)
-                        ),
+                            cfg.validation.min_train_bars, max(126, len(fold.train) // 3)),
                         max_train_bars=cfg.validation.max_train_bars,
-                        embargo=cfg.validation.embargo_bars,
-                    )
+                        embargo=cfg.validation.embargo_bars)
                     parameters = tune_forecaster(
                         name,
                         dataset.features[ticker].loc[:, FEATURE_COLUMNS],
@@ -203,32 +186,27 @@ class ExperimentRunner:
                         decision_interval=cfg.execution.decision_interval,
                         target_horizon=cfg.data.target_horizon,
                         risk_aversion=cfg.models.supervised_risk_aversion,
-                        objective_metric=cfg.tuning.objective,
-                    )
+                        objective_metric=cfg.tuning.objective)
                     store.add_tuning_parameters(
                         metadata,
                         ticker,
-                        parameters,
-                    )
+                        parameters)
                 if name in {"lstm", "tcn", "transformer"}:
                     parameters.setdefault("lookback", cfg.models.lookback)
                     parameters.setdefault("device", cfg.models.device)
                 parameters.setdefault(
-                    "risk_aversion", cfg.models.supervised_risk_aversion
-                )
+                    "risk_aversion", cfg.models.supervised_risk_aversion)
 
                 model = create_forecaster(name, seed=cfg.experiment.seed, **parameters)
                 model.fit(train_features[ticker], targets.iloc[fold.train])
                 context = ModelContext(
                     context_features[ticker],
                     targets.iloc[context_positions],
-                    target_horizon=cfg.data.target_horizon,
-                )
+                    target_horizon=cfg.data.target_horizon)
                 predictions = model.predict_returns(
                     test_features[ticker],
                     context=context,
-                    realised_targets=targets.iloc[fold.test],
-                )
+                    realised_targets=targets.iloc[fold.test])
                 position_columns[ticker] = model.positions_from_predictions(predictions)
                 prediction_columns[ticker] = (predictions, targets.iloc[fold.test])
             positions = pd.DataFrame(position_columns).reindex(dataset.index[fold.test])
@@ -239,8 +217,7 @@ class ExperimentRunner:
                 store,
                 metadata,
                 positions,
-                result,
-            )
+                result)
         except Exception as exc:
             LOGGER.exception("%s failed on fold %s", name, fold.number)
             store.add_failure(baseline=name, fold=fold.number, repetition=0, error=repr(exc))
@@ -250,8 +227,7 @@ class ExperimentRunner:
         train_features, train_closes = self.frames(dataset, fold.train)
         test_features, test_closes = self.frames(dataset, fold.test)
         context_positions = np.arange(
-            max(0, int(fold.test[0]) - cfg.models.lookback + 1), int(fold.test[0])
-        )
+            max(0, int(fold.test[0]) - cfg.models.lookback + 1), int(fold.test[0]))
         context_features, _ = self.frames(dataset, context_positions)
         common = {
             "levels": cfg.execution.position_levels,
@@ -273,7 +249,7 @@ class ExperimentRunner:
             "decision_interval": cfg.execution.decision_interval,
             "early_stopping_patience": cfg.models.early_stopping_patience,
             "early_stopping_min_delta": cfg.models.early_stopping_min_delta,
-            "minimum_train_epochs": cfg.models.minimum_train_epochs,
+            "minimum_train_epochs": cfg.models.minimum_train_epochs
         }
         try:
             tuning_key = (name, fold.number)
@@ -314,14 +290,12 @@ class ExperimentRunner:
                         encoder_dilations=cfg.models.rl_encoder_dilations,
                         encoder_dropout=cfg.models.rl_encoder_dropout,
                         device=cfg.models.device,
-                        objective_metric=cfg.tuning.objective,
-                    )
+                        objective_metric=cfg.tuning.objective)
                     self.rl_parameters[tuning_key] = selected
                     store.add_tuning_parameters(
                         self.metadata(name, fold, repetition, cfg.experiment.seed),
                         "ALL",
-                        selected,
-                    )
+                        selected)
                 common.update(self.rl_parameters[tuning_key])
             if name == "single_a2c":
                 policy = train_joint_a2c(train_features, train_closes, **common)
@@ -343,22 +317,19 @@ class ExperimentRunner:
                     train_closes,
                     share_after_fraction=cfg.models.garl_share_after_fraction,
                     share_every=cfg.models.garl_share_every,
-                    **garl_common,
-                )
+                    **garl_common)
             elif name == "selective_garl_ddal":
                 garl_common = dict(common)
                 garl_common.setdefault("pool_size", cfg.models.garl_pool_size or None)
                 garl_common.setdefault(
-                    "alignment_threshold", cfg.models.selective_garl_alignment_threshold
-                )
+                    "alignment_threshold", cfg.models.selective_garl_alignment_threshold)
                 garl_common.setdefault("peer_mix", cfg.models.selective_garl_peer_mix)
                 policy = train_selective_garl_ddal(
                     train_features,
                     train_closes,
                     share_after_fraction=cfg.models.garl_share_after_fraction,
                     share_every=cfg.models.garl_share_every,
-                    **garl_common,
-                )
+                    **garl_common)
             else:
                 raise KeyError(name)
             metadata = self.metadata(name, fold, repetition, seed)
@@ -366,17 +337,14 @@ class ExperimentRunner:
             positions = policy.positions(
                 test_features,
                 context=context_features,
-                closes=test_closes,
-            )
+                closes=test_closes)
             result = self.backtest(test_closes, positions)
             self.save_result(
                 store,
                 metadata,
                 positions,
-                result,
-            )
+                result)
         except Exception as exc:
             LOGGER.exception("%s failed on fold %s seed %s", name, fold.number, seed)
             store.add_failure(
-                baseline=name, fold=fold.number, repetition=repetition, seed=seed, error=repr(exc)
-            )
+                baseline=name, fold=fold.number, repetition=repetition, seed=seed, error=repr(exc))

@@ -23,8 +23,7 @@ def resolve_torch_device(device: str | torch.device | None = "auto") -> torch.de
         and resolved.index >= torch.cuda.device_count()
     ):
         raise RuntimeError(
-            f"Requested {device!r}, but only {torch.cuda.device_count()} CUDA device(s) exist."
-        )
+            f"Requested {device!r}, but only {torch.cuda.device_count()} CUDA device(s) exist.")
     if requested == "mps" and not torch.backends.mps.is_available():
         raise RuntimeError("Requested 'mps', but Apple Metal acceleration is unavailable.")
     return resolved

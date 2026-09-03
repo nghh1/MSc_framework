@@ -20,11 +20,9 @@ class LSTM_custom(nn.Module):
             hidden,
             num_layers=layers,
             batch_first=True,
-            dropout=dropout if layers > 1 else 0,
-        )
+            dropout=dropout if layers > 1 else 0)
         self.head = nn.Sequential(
-            nn.Linear(hidden, hidden // 2), nn.ReLU(), nn.Linear(hidden // 2, 1)
-        )
+            nn.Linear(hidden, hidden // 2), nn.ReLU(), nn.Linear(hidden // 2, 1))
 
     def forward(self, x):
         _, (hidden, _) = self.encoder(x)
@@ -36,8 +34,7 @@ class CausalConvLayer(nn.Module):
         super().__init__()
         self.left_padding = 2 * dilation
         self.conv = weight_norm(
-            nn.Conv1d(in_channels, out_channels, kernel_size=3, dilation=dilation)
-        )
+            nn.Conv1d(in_channels, out_channels, kernel_size=3, dilation=dilation))
         self.activation = nn.ReLU()
         self.dropout = nn.Dropout(dropout)
 
@@ -53,8 +50,7 @@ class CausalConvBlock(nn.Module):
         super().__init__()
         self.layers = nn.Sequential(
             CausalConvLayer(in_channels, out_channels, dilation, dropout),
-            CausalConvLayer(out_channels, out_channels, dilation, dropout),
-        )
+            CausalConvLayer(out_channels, out_channels, dilation, dropout))
         self.residual = (
             nn.Identity()
             if in_channels == out_channels
@@ -73,7 +69,7 @@ class TCN_custom(nn.Module):
             CausalConvBlock(n_features, hidden, dilation=1, dropout=dropout),
             CausalConvBlock(hidden, hidden, dilation=2, dropout=dropout),
             CausalConvBlock(hidden, hidden, dilation=4, dropout=dropout),
-            CausalConvBlock(hidden, hidden, dilation=8, dropout=dropout),
+            CausalConvBlock(hidden, hidden, dilation=8, dropout=dropout)
         )
         self.head = nn.Linear(hidden, 1)
 
@@ -85,15 +81,8 @@ class TCN_custom(nn.Module):
 class Transformer_custom(nn.Module):
     """Compact encoder-only Transformer for one-step return forecasting."""
 
-    def __init__(
-        self,
-        n_features: int,
-        hidden: int,
-        heads: int,
-        layers: int,
-        dropout: float,
-        max_length: int,
-    ):
+    def __init__(self, n_features: int, hidden: int, heads: int, layers: int, dropout: float,
+                 max_length: int):
         super().__init__()
         self.project = nn.Linear(n_features, hidden)
         self.position = nn.Parameter(torch.empty(1, max_length, hidden))
@@ -105,11 +94,9 @@ class Transformer_custom(nn.Module):
             dropout=dropout,
             activation="gelu",
             batch_first=True,
-            norm_first=True,
-        )
+            norm_first=True)
         self.encoder = nn.TransformerEncoder(
-            block, num_layers=layers, enable_nested_tensor=False
-        )
+            block, num_layers=layers, enable_nested_tensor=False)
         self.norm = nn.LayerNorm(hidden)
         self.head = nn.Linear(hidden, 1)
 
@@ -119,8 +106,7 @@ class Transformer_custom(nn.Module):
             raise ValueError("Sequence is longer than the configured Transformer lookback.")
         encoded = self.project(x) + self.position[:, :length]
         mask = torch.triu(
-            torch.ones(length, length, device=x.device, dtype=torch.bool), diagonal=1
-        )
+            torch.ones(length, length, device=x.device, dtype=torch.bool), diagonal=1)
         encoded = self.encoder(encoded, mask=mask)
         return self.head(self.norm(encoded[:, -1])).squeeze(-1)
 
@@ -128,18 +114,9 @@ class Transformer_custom(nn.Module):
 class TorchSequenceForecaster(ForecastModel):
     architecture = "lstm"  # default
 
-    def __init__(
-        self,
-        lookback: int = 20,
-        hidden: int = 32,
-        layers: int = 2,
-        heads: int = 4,
-        dropout: float = 0.2,
-        epochs: int = 20,
-        learning_rate: float = 1e-3,
-        seed: int = 42,
-        device: str | None = None,
-    ) -> None:
+    def __init__(self, lookback: int = 20, hidden: int = 32, layers: int = 2, heads: int = 4,
+                 dropout: float = 0.2, epochs: int = 20, learning_rate: float = 1e-3, seed: int = 42,
+                 device: str | None = None) -> None:
         super().__init__()
         self.lookback = lookback
         self.hidden = hidden
@@ -165,22 +142,19 @@ class TorchSequenceForecaster(ForecastModel):
         if self.architecture == "transformer":
             if self.hidden % self.heads:
                 raise ValueError(
-                    "Transformer hidden size must be divisible by the number of attention heads."
-                )
+                    "Transformer hidden size must be divisible by the number of attention heads.")
             return Transformer_custom(
                 n_features,
                 self.hidden,
                 self.heads,
                 self.layers,
                 self.dropout,
-                self.lookback,
-            )
+                self.lookback)
         raise ValueError(f"Unknown sequence architecture: {self.architecture}")
 
     def windows(self, values: np.ndarray, targets: np.ndarray | None = None):
         x = np.stack(
-            [values[i - self.lookback + 1 : i + 1] for i in range(self.lookback - 1, len(values))]
-        )
+            [values[i - self.lookback + 1 : i + 1] for i in range(self.lookback - 1, len(values))])
         if targets is None:
             return x
         return x, targets[self.lookback - 1 :]
@@ -218,12 +192,8 @@ class TorchSequenceForecaster(ForecastModel):
         return self
 
     @torch.no_grad()
-    def predict_returns(
-        self,
-        features: pd.DataFrame,
-        context: ModelContext | None = None,
-        realised_targets: pd.Series | None = None,
-    ) -> pd.Series:
+    def predict_returns(self, features: pd.DataFrame, context: ModelContext | None = None,
+                        realised_targets: pd.Series | None = None) -> pd.Series:
         if self.model is None:
             raise RuntimeError("Model is not fitted.")
         history = context.features if context is not None else self.history
@@ -238,8 +208,7 @@ class TorchSequenceForecaster(ForecastModel):
                 predictions[date] = 0.0
                 continue
             window = torch.tensor(
-                scaled[i - self.lookback + 1 : i + 1], dtype=torch.float32, device=self.device
-            ).unsqueeze(0)
+                scaled[i - self.lookback + 1 : i + 1], dtype=torch.float32, device=self.device).unsqueeze(0)
             scaled_prediction = float(self.model(window).item())
             predictions[date] = scaled_prediction * self.target_std + self.target_mean
         return pd.Series(predictions).reindex(features.index)

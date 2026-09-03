@@ -7,25 +7,13 @@ from torch import nn
 
 from garl_trading.utils import resolve_torch_device
 
-from .core import (
-    ActorCritic,
-    JointActorCritic,
-    RewardEarlyStopper,
-    TradingState,
-    fit_feature_scalers,
-    make_states,
-)
+from .core import (ActorCritic, JointActorCritic, RewardEarlyStopper, TradingState,
+                   fit_feature_scalers, make_states)
 from .trainers import RLPolicySet
 
 
-def gae(
-    rewards: list[float],
-    values: list[float],
-    dones: list[bool],
-    next_value: float,
-    gamma: float,
-    gae_lambda: float
-) -> tuple[np.ndarray, np.ndarray]:
+def gae(rewards: list[float], values: list[float], dones: list[bool], next_value: float,
+        gamma: float, gae_lambda: float) -> tuple[np.ndarray, np.ndarray]:
     advantages = np.zeros(len(rewards), dtype=np.float32)
     running = 0.0
     for i in reversed(range(len(rewards))):
@@ -37,17 +25,9 @@ def gae(
     return advantages, advantages + np.asarray(values, dtype=np.float32)
 
 
-def asset_ppo_epoch(
-    model: ActorCritic,
-    state: TradingState,
-    optimizer: torch.optim.Optimizer,
-    rollout_length: int,
-    gamma: float,
-    rng: np.random.Generator,
-    clip_epsilon: float,
-    gae_lambda: float,
-    update_epochs: int = 4
-) -> dict[str, float]:
+def asset_ppo_epoch(model: ActorCritic, state: TradingState, optimizer: torch.optim.Optimizer,
+                    rollout_length: int, gamma: float, rng: np.random.Generator, clip_epsilon: float,
+                    gae_lambda: float, update_epochs: int = 4) -> dict[str, float]:
     device = next(model.parameters()).device
     observations, actions, rewards, values, old_log_probabilities, dones = [], [], [], [], [], []
     observation = state.observation()
@@ -105,32 +85,17 @@ def asset_ppo_epoch(
     }
 
 
-def train_independent_ppo(
-    features: dict[str, pd.DataFrame],
-    closes: dict[str, pd.Series],
-    levels: tuple[float, ...],
-    lookback: int,
-    epochs: int,
-    rollout_length: int,
-    learning_rate: float,
-    gamma: float,
-    cost_rate: float,
-    seed: int,
-    device: str = "auto",
-    encoder_channels: int = 32,
-    encoder_kernel_size: int = 3,
-    encoder_dilations: tuple[int, ...] = (1, 2, 4, 8),
-    encoder_dropout: float = 0.0,
-    clip_epsilon: float = 0.2,
-    gae_lambda: float = 0.95,
-    turnover_penalty_multiplier: float = 1.0,
-    short_borrow_bps_annual: float = 0.0,
-    rebalance_threshold: float = 0.0,
-    decision_interval: int = 1,
-    early_stopping_patience: int = 15,
-    early_stopping_min_delta: float = 1e-4,
-    minimum_train_epochs: int = 30
-) -> RLPolicySet:
+def train_independent_ppo(features: dict[str, pd.DataFrame], closes: dict[str, pd.Series],
+                          levels: tuple[float, ...], lookback: int, epochs: int, rollout_length: int,
+                          learning_rate: float, gamma: float, cost_rate: float, seed: int,
+                          device: str = "auto", encoder_channels: int = 32,
+                          encoder_kernel_size: int = 3,
+                          encoder_dilations: tuple[int, ...] = (1, 2, 4, 8),
+                          encoder_dropout: float = 0.0, clip_epsilon: float = 0.2,
+                          gae_lambda: float = 0.95, turnover_penalty_multiplier: float = 1.0,
+                          short_borrow_bps_annual: float = 0.0, rebalance_threshold: float = 0.0,
+                          decision_interval: int = 1, early_stopping_patience: int = 15,
+                          early_stopping_min_delta: float = 1e-4, minimum_train_epochs: int = 30) -> RLPolicySet:
     device = resolve_torch_device(device)
     tickers = tuple(features)
     scalers = fit_feature_scalers(features)
@@ -139,8 +104,7 @@ def train_independent_ppo(
         turnover_penalty_multiplier=turnover_penalty_multiplier,
         short_borrow_bps_annual=short_borrow_bps_annual,
         rebalance_threshold=rebalance_threshold,
-        decision_interval=decision_interval,
-    )
+        decision_interval=decision_interval)
     models, optimizers, randoms = {}, {}, {}
     observation_size = features[tickers[0]].shape[1] * lookback + 1
     for i, ticker in enumerate(tickers):
@@ -152,14 +116,12 @@ def train_independent_ppo(
             encoder_channels=encoder_channels,
             encoder_kernel_size=encoder_kernel_size,
             encoder_dilations=encoder_dilations,
-            encoder_dropout=encoder_dropout,
-        ).to(device)
+            encoder_dropout=encoder_dropout).to(device)
         optimizers[ticker] = torch.optim.Adam(models[ticker].parameters(), lr=learning_rate)
         randoms[ticker] = np.random.default_rng(seed + i)
     diagnostics = []
     stopper = RewardEarlyStopper(
-        early_stopping_patience, early_stopping_min_delta, minimum_train_epochs
-    )
+        early_stopping_patience, early_stopping_min_delta, minimum_train_epochs)
     for epoch in range(epochs):
         epoch_rows = []
         for ticker in tickers:
@@ -172,8 +134,7 @@ def train_independent_ppo(
                     gamma=gamma**decision_interval,
                     rng=randoms[ticker],
                     clip_epsilon=clip_epsilon,
-                    gae_lambda=gae_lambda
-                )
+                    gae_lambda=gae_lambda)
             )
         row = {
             "epoch": epoch,
@@ -189,7 +150,7 @@ def train_independent_ppo(
                 {
                     "early_stopped": True,
                     "best_epoch": stopper.best_epoch,
-                    "stop_epoch": stopper.stop_epoch,
+                    "stop_epoch": stopper.stop_epoch
                 }
             )
             break
@@ -205,36 +166,19 @@ def train_independent_ppo(
         short_borrow_bps_annual / 10000 / 252,
         diagnostics,
         rebalance_threshold,
-        decision_interval,
-    )
+        decision_interval)
 
 
-def train_joint_ppo(
-    features: dict[str, pd.DataFrame],
-    closes: dict[str, pd.Series],
-    levels: tuple[float, ...],
-    lookback: int,
-    epochs: int,
-    rollout_length: int,
-    learning_rate: float,
-    gamma: float,
-    cost_rate: float,
-    seed: int,
-    device: str = "auto",
-    encoder_channels: int = 32,
-    encoder_kernel_size: int = 3,
-    encoder_dilations: tuple[int, ...] = (1, 2, 4, 8),
-    encoder_dropout: float = 0.0,
-    clip_epsilon: float = 0.2,
-    gae_lambda: float = 0.95,
-    turnover_penalty_multiplier: float = 1.0,
-    short_borrow_bps_annual: float = 0.0,
-    rebalance_threshold: float = 0.0,
-    decision_interval: int = 1,
-    early_stopping_patience: int = 15,
-    early_stopping_min_delta: float = 1e-4,
-    minimum_train_epochs: int = 30
-) -> RLPolicySet:
+def train_joint_ppo(features: dict[str, pd.DataFrame], closes: dict[str, pd.Series],
+                    levels: tuple[float, ...], lookback: int, epochs: int, rollout_length: int,
+                    learning_rate: float, gamma: float, cost_rate: float, seed: int,
+                    device: str = "auto", encoder_channels: int = 32, encoder_kernel_size: int = 3,
+                    encoder_dilations: tuple[int, ...] = (1, 2, 4, 8), encoder_dropout: float = 0.0,
+                    clip_epsilon: float = 0.2, gae_lambda: float = 0.95,
+                    turnover_penalty_multiplier: float = 1.0, short_borrow_bps_annual: float = 0.0,
+                    rebalance_threshold: float = 0.0, decision_interval: int = 1,
+                    early_stopping_patience: int = 15, early_stopping_min_delta: float = 1e-4,
+                    minimum_train_epochs: int = 30) -> RLPolicySet:
     device = resolve_torch_device(device)
     tickers = tuple(features)
     scalers = fit_feature_scalers(features)
@@ -243,8 +187,7 @@ def train_joint_ppo(
         turnover_penalty_multiplier=turnover_penalty_multiplier,
         short_borrow_bps_annual=short_borrow_bps_annual,
         rebalance_threshold=rebalance_threshold,
-        decision_interval=decision_interval,
-    )
+        decision_interval=decision_interval)
     per_asset_size = features[tickers[0]].shape[1] * lookback + 1
     torch.manual_seed(seed)
     model = JointActorCritic(
@@ -255,16 +198,14 @@ def train_joint_ppo(
         encoder_channels=encoder_channels,
         encoder_kernel_size=encoder_kernel_size,
         encoder_dilations=encoder_dilations,
-        encoder_dropout=encoder_dropout,
-    ).to(device)
+        encoder_dropout=encoder_dropout).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     rng = np.random.default_rng(seed)
     current = {ticker: states[ticker].observation() for ticker in tickers}
 
     diagnostics = []
     stopper = RewardEarlyStopper(
-        early_stopping_patience, early_stopping_min_delta, minimum_train_epochs
-    )
+        early_stopping_patience, early_stopping_min_delta, minimum_train_epochs)
     for epoch in range(epochs):
         observations, actions, rewards, values, old_logs, dones = [], [], [], [], [], []
         for _ in range(rollout_length):
@@ -288,10 +229,7 @@ def train_joint_ppo(
             old_logs.append(
                 float(
                     sum(
-                        np.log(probabilities[i, action] + 1e-8) for i, action in enumerate(selected)
-                    )
-                )
-            )
+                        np.log(probabilities[i, action] + 1e-8) for i, action in enumerate(selected))))
             dones.append(any(step_dones))
 
         with torch.no_grad():
@@ -303,8 +241,7 @@ def train_joint_ppo(
             dones,
             float(next_value.item()),
             gamma**decision_interval,
-            gae_lambda,
-        )
+            gae_lambda)
         obs_tensor = torch.tensor(np.stack(observations), dtype=torch.float32, device=device)
         action_tensor = torch.tensor(actions, dtype=torch.long, device=device)
         old_log_tensor = torch.tensor(old_logs, device=device)
@@ -321,8 +258,7 @@ def train_joint_ppo(
             ratio = torch.exp(new_log - old_log_tensor)
             objective = torch.minimum(
                 ratio * advantage_tensor,
-                torch.clamp(ratio, 1 - clip_epsilon, 1 + clip_epsilon) * advantage_tensor
-            )
+                torch.clamp(ratio, 1 - clip_epsilon, 1 + clip_epsilon) * advantage_tensor)
             probabilities = torch.softmax(logits, dim=-1)
             entropy = -(probabilities * log_probabilities).sum(axis=-1).mean()
             loss = (
@@ -350,7 +286,7 @@ def train_joint_ppo(
                 {
                     "early_stopped": True,
                     "best_epoch": stopper.best_epoch,
-                    "stop_epoch": stopper.stop_epoch,
+                    "stop_epoch": stopper.stop_epoch
                 }
             )
             break
@@ -366,5 +302,4 @@ def train_joint_ppo(
         short_borrow_bps_annual / 10000 / 252,
         diagnostics,
         rebalance_threshold,
-        decision_interval,
-    )
+        decision_interval)

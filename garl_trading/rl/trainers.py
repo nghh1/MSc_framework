@@ -10,17 +10,9 @@ from torch import nn
 
 from garl_trading.utils import resolve_torch_device
 
-from .core import (
-    JointActorCritic,
-    RewardEarlyStopper,
-    a2c_gradient,
-    apply_gradient,
-    fit_feature_scalers,
-    greedy_asset_positions,
-    incremental_target,
-    initialise_asset_actor_critics,
-    make_states,
-)
+from .core import (JointActorCritic, RewardEarlyStopper, a2c_gradient, apply_gradient,
+                   fit_feature_scalers, greedy_asset_positions, incremental_target,
+                   initialise_asset_actor_critics, make_states)
 
 
 @dataclass
@@ -37,12 +29,8 @@ class RLPolicySet:
     rebalance_threshold: float = 0.0
     decision_interval: int = 1
 
-    def positions(
-        self,
-        features: dict[str, pd.DataFrame],
-        context: dict[str, pd.DataFrame],
-        closes: dict[str, pd.Series] | None = None
-    ) -> pd.DataFrame:
+    def positions(self, features: dict[str, pd.DataFrame], context: dict[str, pd.DataFrame],
+                  closes: dict[str, pd.Series] | None = None) -> pd.DataFrame:
         if self.kind == "joint":
             return joint_positions(self, features, context, closes=closes)
         series = {
@@ -57,39 +45,23 @@ class RLPolicySet:
                 self.cost_rate,
                 self.short_borrow_rate,
                 self.rebalance_threshold,
-                self.decision_interval,
-            )
+                self.decision_interval)
             for ticker in self.tickers
         }
         return pd.DataFrame(series).reindex(features[self.tickers[0]].index)
 
 
-def train_independent_a2c(
-    features: dict[str, pd.DataFrame],
-    closes: dict[str, pd.Series],
-    levels: tuple[float, ...],
-    lookback: int,
-    epochs: int,
-    rollout_length: int,
-    learning_rate: float,
-    gamma: float,
-    cost_rate: float,
-    seed: int,
-    device: str = "auto",
-    encoder_channels: int = 32,
-    encoder_kernel_size: int = 3,
-    encoder_dilations: tuple[int, ...] = (1, 2, 4, 8),
-    encoder_dropout: float = 0.0,
-    gae_lambda: float = 0.95,
-    entropy_weight: float = 0.01,
-    turnover_penalty_multiplier: float = 1.0,
-    short_borrow_bps_annual: float = 0.0,
-    rebalance_threshold: float = 0.0,
-    decision_interval: int = 1,
-    early_stopping_patience: int = 15,
-    early_stopping_min_delta: float = 1e-4,
-    minimum_train_epochs: int = 30
-) -> RLPolicySet:
+def train_independent_a2c(features: dict[str, pd.DataFrame], closes: dict[str, pd.Series],
+                          levels: tuple[float, ...], lookback: int, epochs: int, rollout_length: int,
+                          learning_rate: float, gamma: float, cost_rate: float, seed: int,
+                          device: str = "auto", encoder_channels: int = 32,
+                          encoder_kernel_size: int = 3,
+                          encoder_dilations: tuple[int, ...] = (1, 2, 4, 8),
+                          encoder_dropout: float = 0.0, gae_lambda: float = 0.95,
+                          entropy_weight: float = 0.01, turnover_penalty_multiplier: float = 1.0,
+                          short_borrow_bps_annual: float = 0.0, rebalance_threshold: float = 0.0,
+                          decision_interval: int = 1, early_stopping_patience: int = 15,
+                          early_stopping_min_delta: float = 1e-4, minimum_train_epochs: int = 30) -> RLPolicySet:
     device = resolve_torch_device(device)
     tickers = tuple(features)
     scalers = fit_feature_scalers(features)
@@ -98,8 +70,7 @@ def train_independent_a2c(
         turnover_penalty_multiplier=turnover_penalty_multiplier,
         short_borrow_bps_annual=short_borrow_bps_annual,
         rebalance_threshold=rebalance_threshold,
-        decision_interval=decision_interval,
-    )
+        decision_interval=decision_interval)
     observation_size = features[tickers[0]].shape[1] * lookback + 1
     models = initialise_asset_actor_critics(
         tickers,
@@ -111,8 +82,7 @@ def train_independent_a2c(
         encoder_channels=encoder_channels,
         encoder_kernel_size=encoder_kernel_size,
         encoder_dilations=encoder_dilations,
-        encoder_dropout=encoder_dropout,
-    )
+        encoder_dropout=encoder_dropout)
     optimizers, randoms = {}, {}
     for i, ticker in enumerate(tickers):
         optimizers[ticker] = torch.optim.Adam(models[ticker].parameters(), lr=learning_rate)
@@ -120,8 +90,7 @@ def train_independent_a2c(
     diagnostics = []
     stoppers = {
         ticker: RewardEarlyStopper(
-            early_stopping_patience, early_stopping_min_delta, minimum_train_epochs
-        )
+            early_stopping_patience, early_stopping_min_delta, minimum_train_epochs)
         for ticker in tickers
     }
     reward_history: dict[str, list[float]] = {ticker: [] for ticker in tickers}
@@ -137,8 +106,7 @@ def train_independent_a2c(
                 gamma=gamma**decision_interval,
                 rng=randoms[ticker],
                 gae_lambda=gae_lambda,
-                entropy_weight=entropy_weight,
-            )
+                entropy_weight=entropy_weight)
             apply_gradient(models[ticker], optimizers[ticker], gradients)
             reward_history[ticker].append(reward)
             row = {
@@ -146,7 +114,7 @@ def train_independent_a2c(
                 "agent": ticker,
                 "training_reward": reward,
                 "loss": loss,
-                "checkpoint_eligible": epoch + 1 > minimum_train_epochs,
+                "checkpoint_eligible": epoch + 1 > minimum_train_epochs
             }
             smoothed = float(np.mean(reward_history[ticker][-5:]))
             if stoppers[ticker].update(epoch, smoothed, models[ticker]):
@@ -154,7 +122,7 @@ def train_independent_a2c(
                     {
                         "early_stopped": True,
                         "best_epoch": stoppers[ticker].best_epoch,
-                        "stop_epoch": stoppers[ticker].stop_epoch,
+                        "stop_epoch": stoppers[ticker].stop_epoch
                     }
                 )
                 stoppers[ticker].restore(models[ticker])
@@ -175,36 +143,19 @@ def train_independent_a2c(
         short_borrow_bps_annual / 10000 / 252,
         diagnostics,
         rebalance_threshold,
-        decision_interval,
-    )
+        decision_interval)
 
 
-def train_joint_a2c(
-    features: dict[str, pd.DataFrame],
-    closes: dict[str, pd.Series],
-    levels: tuple[float, ...],
-    lookback: int,
-    epochs: int,
-    rollout_length: int,
-    learning_rate: float,
-    gamma: float,
-    cost_rate: float,
-    seed: int,
-    device: str = "auto",
-    encoder_channels: int = 32,
-    encoder_kernel_size: int = 3,
-    encoder_dilations: tuple[int, ...] = (1, 2, 4, 8),
-    encoder_dropout: float = 0.0,
-    gae_lambda: float = 0.95,
-    entropy_weight: float = 0.01,
-    turnover_penalty_multiplier: float = 1.0,
-    short_borrow_bps_annual: float = 0.0,
-    rebalance_threshold: float = 0.0,
-    decision_interval: int = 1,
-    early_stopping_patience: int = 15,
-    early_stopping_min_delta: float = 1e-4,
-    minimum_train_epochs: int = 30
-) -> RLPolicySet:
+def train_joint_a2c(features: dict[str, pd.DataFrame], closes: dict[str, pd.Series],
+                    levels: tuple[float, ...], lookback: int, epochs: int, rollout_length: int,
+                    learning_rate: float, gamma: float, cost_rate: float, seed: int,
+                    device: str = "auto", encoder_channels: int = 32, encoder_kernel_size: int = 3,
+                    encoder_dilations: tuple[int, ...] = (1, 2, 4, 8), encoder_dropout: float = 0.0,
+                    gae_lambda: float = 0.95, entropy_weight: float = 0.01,
+                    turnover_penalty_multiplier: float = 1.0, short_borrow_bps_annual: float = 0.0,
+                    rebalance_threshold: float = 0.0, decision_interval: int = 1,
+                    early_stopping_patience: int = 15, early_stopping_min_delta: float = 1e-4,
+                    minimum_train_epochs: int = 30) -> RLPolicySet:
     device = resolve_torch_device(device)
     tickers = tuple(features)
     scalers = fit_feature_scalers(features)
@@ -213,8 +164,7 @@ def train_joint_a2c(
         turnover_penalty_multiplier=turnover_penalty_multiplier,
         short_borrow_bps_annual=short_borrow_bps_annual,
         rebalance_threshold=rebalance_threshold,
-        decision_interval=decision_interval,
-    )
+        decision_interval=decision_interval)
     per_asset_size = features[tickers[0]].shape[1] * lookback + 1
     torch.manual_seed(seed)
     model = JointActorCritic(
@@ -225,16 +175,14 @@ def train_joint_a2c(
         encoder_channels=encoder_channels,
         encoder_kernel_size=encoder_kernel_size,
         encoder_dilations=encoder_dilations,
-        encoder_dropout=encoder_dropout,
-    ).to(device)
+        encoder_dropout=encoder_dropout).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     rng = np.random.default_rng(seed)
     observations = {ticker: states[ticker].observation() for ticker in tickers}
 
     diagnostics = []
     stopper = RewardEarlyStopper(
-        early_stopping_patience, early_stopping_min_delta, minimum_train_epochs
-    )
+        early_stopping_patience, early_stopping_min_delta, minimum_train_epochs)
     for epoch in range(epochs):
         obs_buffer, action_buffer, reward_buffer, value_buffer, done_buffer = [], [], [], [], []
         for _ in range(rollout_length):
@@ -305,7 +253,7 @@ def train_joint_a2c(
                 {
                     "early_stopped": True,
                     "best_epoch": stopper.best_epoch,
-                    "stop_epoch": stopper.stop_epoch,
+                    "stop_epoch": stopper.stop_epoch
                 }
             )
             break
@@ -321,17 +269,12 @@ def train_joint_a2c(
         short_borrow_bps_annual / 10000 / 252,
         diagnostics,
         rebalance_threshold,
-        decision_interval,
-    )
+        decision_interval)
 
 
 @torch.no_grad()
-def joint_positions(
-    policy: RLPolicySet,
-    features: dict[str, pd.DataFrame],
-    context: dict[str, pd.DataFrame],
-    closes: dict[str, pd.Series] | None = None,
-) -> pd.DataFrame:
+def joint_positions(policy: RLPolicySet, features: dict[str, pd.DataFrame],
+                    context: dict[str, pd.DataFrame], closes: dict[str, pd.Series] | None = None) -> pd.DataFrame:
     model = policy.models
     model.eval()
     device = next(model.parameters()).device
@@ -356,19 +299,16 @@ def joint_positions(
             window = values[ticker][max(0, i - policy.lookback + 1) : i + 1]
             if len(window) < policy.lookback:
                 window = np.concatenate(
-                    [np.repeat(window[:1], policy.lookback - len(window), axis=0), window]
-                )
+                    [np.repeat(window[:1], policy.lookback - len(window), axis=0), window])
             observations.append(
-                np.concatenate([window.reshape(-1), [current[ticker]]]).astype(np.float32)
-            )
+                np.concatenate([window.reshape(-1), [current[ticker]]]).astype(np.float32))
         output = model(torch.tensor(np.concatenate(observations), device=device).unsqueeze(0))
         logits = output[0] if isinstance(output, tuple) else output
         actions = torch.argmax(logits.squeeze(0), dim=-1).cpu().numpy()
         row = {}
         for ticker, action in zip(policy.tickers, actions):
             current[ticker] = incremental_target(
-                current[ticker], action, np.asarray(policy.levels, dtype=float)
-            )
+                current[ticker], action, np.asarray(policy.levels, dtype=float))
             row[ticker] = current[ticker]
         rows.append(row)
     return pd.DataFrame(rows, index=index)

@@ -18,16 +18,8 @@ class Fold:
     kind: str = "walk_forward"
 
 
-def make_fold(
-    number: int,
-    train: np.ndarray,
-    test: np.ndarray,
-    index: pd.DatetimeIndex,
-    *,
-    max_train_bars: int | None,
-    embargo: int,
-    kind: str,
-) -> Fold:
+def make_fold(number: int, train: np.ndarray, test: np.ndarray, index: pd.DatetimeIndex, *,
+              max_train_bars: int | None, embargo: int, kind: str) -> Fold:
     cutoff = int(test.min()) - embargo
     train = train[train < cutoff]
     if max_train_bars:
@@ -42,20 +34,12 @@ def make_fold(
         train_end=index[train[-1]],
         test_start=index[test[0]],
         test_end=index[test[-1]],
-        kind=kind,
-    )
+        kind=kind)
 
 
-def outer_folds(
-    index: pd.DatetimeIndex,
-    *,
-    n_folds: int,
-    min_train_bars: int,
-    max_train_bars: int | None,
-    embargo: int,
-    holdout_start: str | None = None,
-    use_holdout: bool = False,
-) -> tuple[list[Fold], Fold | None]:
+def outer_folds(index: pd.DatetimeIndex, *, n_folds: int, min_train_bars: int,
+                max_train_bars: int | None, embargo: int, holdout_start: str | None = None,
+                use_holdout: bool = False) -> tuple[list[Fold], Fold | None]:
     n = len(index)
     holdout_position = (
         int(index.searchsorted(pd.Timestamp(holdout_start))) if use_holdout and holdout_start else n
@@ -72,8 +56,7 @@ def outer_folds(
             index=index,
             max_train_bars=max_train_bars,
             embargo=embargo,
-            kind="walk_forward",
-        )
+            kind="walk_forward")
         for i in range(n_folds)
     ]
     holdout = None
@@ -85,20 +68,12 @@ def outer_folds(
             index=index,
             max_train_bars=max_train_bars,
             embargo=embargo,
-            kind="final_holdout",
-        )
+            kind="final_holdout")
     return folds, holdout
 
 
-def nested_folds(
-    train_positions: np.ndarray,
-    index: pd.DatetimeIndex,
-    *,
-    n_folds: int,
-    min_train_bars: int,
-    max_train_bars: int | None,
-    embargo: int,
-) -> list[Fold]:
+def nested_folds(train_positions: np.ndarray, index: pd.DatetimeIndex, *, n_folds: int,
+                 min_train_bars: int, max_train_bars: int | None, embargo: int) -> list[Fold]:
     if len(train_positions) <= min_train_bars + n_folds:
         raise ValueError("Insufficient data for inner folds.")
     boundaries = np.linspace(min_train_bars, len(train_positions), n_folds + 1, dtype=int)
@@ -114,7 +89,6 @@ def nested_folds(
                 index=index,
                 max_train_bars=max_train_bars,
                 embargo=embargo,
-                kind="inner",
-            )
+                kind="inner")
         )
     return output

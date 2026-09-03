@@ -23,7 +23,7 @@ FEATURE_COLUMNS = (
     "volatility_30",
     "volume_z_20",
     "obv_slope_10",
-    "range_position_20",
+    "range_position_20"
 )
 
 
@@ -50,8 +50,7 @@ def adx(frame: pd.DataFrame, window: int = 14) -> pd.Series:
     previous_close = close.shift(1)
     true_range = pd.concat(
         [(high - low).abs(), (high - previous_close).abs(), (low - previous_close).abs()],
-        axis=1,
-    ).max(axis=1)
+        axis=1).max(axis=1)
     atr = true_range.ewm(alpha=1 / window, adjust=False, min_periods=window).mean()
     plus_di = 100 * plus_dm.ewm(alpha=1 / window, adjust=False, min_periods=window).mean() / atr
     minus_di = 100 * minus_dm.ewm(alpha=1 / window, adjust=False, min_periods=window).mean() / atr
@@ -88,8 +87,7 @@ def build_features(frame: pd.DataFrame, horizon: int = 5) -> pd.DataFrame:
     )
     previous = close.shift(1)
     true_range = pd.concat(
-        [(high - low).abs(), (high - previous).abs(), (low - previous).abs()], axis=1
-    ).max(axis=1)
+        [(high - low).abs(), (high - previous).abs(), (low - previous).abs()], axis=1).max(axis=1)
     out["atr_14_norm"] = true_range.rolling(14).mean() / close
     out["adx_14"] = adx(frame)
     out["volatility_10"] = out["ret_1"].rolling(10).std()

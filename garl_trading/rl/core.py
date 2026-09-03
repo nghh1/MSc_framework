@@ -9,12 +9,8 @@ import torch
 from sklearn.preprocessing import StandardScaler
 from torch import nn
 
-from garl_trading.execution import (
-    bounded_exposure,
-    drifted_exposure,
-    limited_net_return,
-    thresholded_target,
-)
+from garl_trading.execution import (bounded_exposure, drifted_exposure, limited_net_return,
+                                    thresholded_target)
 
 
 def incremental_target(current: float, action: int, levels: np.ndarray) -> float:
@@ -35,14 +31,7 @@ class RewardEarlyStopper:
         self.best_epoch: int | None = None
         self.stop_epoch: int | None = None
 
-    def update(
-        self,
-        epoch: int,
-        reward: float,
-        models,
-        *,
-        checkpoint_eligible: bool = True,
-    ) -> bool:
+    def update(self, epoch: int, reward: float, models, *, checkpoint_eligible: bool = True) -> bool:
         if self.patience == 0:
             return False
         completed_epochs = epoch + 1
@@ -85,22 +74,15 @@ class RewardEarlyStopper:
 
 
 class CausalTemporalBlock(nn.Module):
-    def __init__(
-        self,
-        in_channels: int,
-        out_channels: int,
-        kernel_size: int,
-        dilation: int,
-        dropout: float,
-    ) -> None:
+    def __init__(self, in_channels: int, out_channels: int, kernel_size: int, dilation: int,
+                 dropout: float) -> None:
         super().__init__()
         self.left_padding = (kernel_size - 1) * dilation
         self.conv = nn.Conv1d(
             in_channels,
             out_channels,
             kernel_size=kernel_size,
-            dilation=dilation,
-        )
+            dilation=dilation)
         self.residual = (
             nn.Identity()
             if in_channels == out_channels
@@ -117,15 +99,9 @@ class CausalTemporalBlock(nn.Module):
 class TemporalFeatureExtractor(nn.Module):
     """Causal TCN over the market window, followed by the current portfolio position."""
 
-    def __init__(
-        self,
-        observation_size: int,
-        lookback: int,
-        channels: int = 32,
-        kernel_size: int = 3,
-        dilations: tuple[int, ...] = (1, 2, 4, 8),
-        dropout: float = 0.0,
-    ) -> None:
+    def __init__(self, observation_size: int, lookback: int, channels: int = 32,
+                 kernel_size: int = 3, dilations: tuple[int, ...] = (1, 2, 4, 8),
+                 dropout: float = 0.0) -> None:
         super().__init__()
         market_size = observation_size - 1
         if lookback < 2 or market_size <= 0 or market_size % lookback:
@@ -145,9 +121,7 @@ class TemporalFeatureExtractor(nn.Module):
                     channels,
                     kernel_size=kernel_size,
                     dilation=dilation,
-                    dropout=dropout,
-                )
-            )
+                    dropout=dropout))
             in_channels = channels
         self.network = nn.Sequential(*blocks)
         self.output_size = channels + 1
@@ -167,18 +141,9 @@ class TemporalFeatureExtractor(nn.Module):
 
 
 class ActorCritic(nn.Module):
-    def __init__(
-        self,
-        observation_size: int,
-        actions: int,
-        hidden: int = 64,
-        *,
-        lookback: int = 20,
-        encoder_channels: int = 32,
-        encoder_kernel_size: int = 3,
-        encoder_dilations: tuple[int, ...] = (1, 2, 4, 8),
-        encoder_dropout: float = 0.0,
-    ) -> None:
+    def __init__(self, observation_size: int, actions: int, hidden: int = 64, *, lookback: int = 20,
+                 encoder_channels: int = 32, encoder_kernel_size: int = 3,
+                 encoder_dilations: tuple[int, ...] = (1, 2, 4, 8), encoder_dropout: float = 0.0) -> None:
         super().__init__()
         self.extractor = TemporalFeatureExtractor(
             observation_size,
@@ -186,14 +151,12 @@ class ActorCritic(nn.Module):
             channels=encoder_channels,
             kernel_size=encoder_kernel_size,
             dilations=encoder_dilations,
-            dropout=encoder_dropout,
-        )
+            dropout=encoder_dropout)
         self.body = nn.Sequential(
             nn.Linear(self.extractor.output_size, hidden),
             nn.Tanh(),
             nn.Linear(hidden, hidden),
-            nn.Tanh(),
-        )
+            nn.Tanh())
         self.policy = nn.Linear(hidden, actions)
         self.value = nn.Linear(hidden, 1)
 
@@ -203,19 +166,9 @@ class ActorCritic(nn.Module):
 
 
 class JointActorCritic(nn.Module):
-    def __init__(
-        self,
-        per_asset_size: int,
-        assets: int,
-        actions: int,
-        hidden: int = 128,
-        *,
-        lookback: int = 20,
-        encoder_channels: int = 32,
-        encoder_kernel_size: int = 3,
-        encoder_dilations: tuple[int, ...] = (1, 2, 4, 8),
-        encoder_dropout: float = 0.0,
-    ) -> None:
+    def __init__(self, per_asset_size: int, assets: int, actions: int, hidden: int = 128, *,
+                 lookback: int = 20, encoder_channels: int = 32, encoder_kernel_size: int = 3,
+                 encoder_dilations: tuple[int, ...] = (1, 2, 4, 8), encoder_dropout: float = 0.0) -> None:
         super().__init__()
         self.assets = assets
         self.per_asset_size = per_asset_size
@@ -225,14 +178,12 @@ class JointActorCritic(nn.Module):
             channels=encoder_channels,
             kernel_size=encoder_kernel_size,
             dilations=encoder_dilations,
-            dropout=encoder_dropout,
-        )
+            dropout=encoder_dropout)
         self.body = nn.Sequential(
             nn.Linear(self.extractor.output_size * assets, hidden),
             nn.Tanh(),
             nn.Linear(hidden, hidden),
-            nn.Tanh()
-        )
+            nn.Tanh())
         self.policies = nn.ModuleList([nn.Linear(hidden, actions) for _ in range(assets)])
         self.value = nn.Linear(hidden, 1)
 
@@ -260,17 +211,9 @@ class TradingState:
     target_position: float = 0.0
 
     @classmethod
-    def create(
-        cls,
-        features: np.ndarray,
-        closes: np.ndarray,
-        levels: np.ndarray,
-        lookback: int,
-        cost_rate: float,
-        short_borrow_rate: float,
-        rebalance_threshold: float = 0.0,
-        decision_interval: int = 1,
-    ) -> TradingState:
+    def create(cls, features: np.ndarray, closes: np.ndarray, levels: np.ndarray, lookback: int,
+               cost_rate: float, short_borrow_rate: float, rebalance_threshold: float = 0.0,
+               decision_interval: int = 1) -> TradingState:
         return cls(
             features,
             closes,
@@ -280,8 +223,7 @@ class TradingState:
             short_borrow_rate,
             rebalance_threshold,
             decision_interval,
-            lookback - 1
-        )
+            lookback - 1)
 
     def observation(self) -> np.ndarray:
         window = self.features[self.cursor - self.lookback + 1 : self.cursor + 1]
@@ -340,19 +282,11 @@ def fit_feature_scalers(features: dict[str, pd.DataFrame]) -> dict[str, Standard
     return {ticker: StandardScaler().fit(frame) for ticker, frame in features.items()}
 
 
-def initialise_asset_actor_critics(
-    tickers: tuple[str, ...],
-    observation_size: int,
-    actions: int,
-    seed: int,
-    device: torch.device,
-    *,
-    lookback: int,
-    encoder_channels: int = 32,
-    encoder_kernel_size: int = 3,
-    encoder_dilations: tuple[int, ...] = (1, 2, 4, 8),
-    encoder_dropout: float = 0.0,
-) -> dict[str, ActorCritic]:
+def initialise_asset_actor_critics(tickers: tuple[str, ...], observation_size: int, actions: int,
+                                   seed: int, device: torch.device, *, lookback: int,
+                                   encoder_channels: int = 32, encoder_kernel_size: int = 3,
+                                   encoder_dilations: tuple[int, ...] = (1, 2, 4, 8),
+                                   encoder_dropout: float = 0.0) -> dict[str, ActorCritic]:
     """Create separate stock agents from one common parameter template.
 
     The common start preserves parameter correspondence for raw GARL gradient transfer.
@@ -366,8 +300,7 @@ def initialise_asset_actor_critics(
         encoder_channels=encoder_channels,
         encoder_kernel_size=encoder_kernel_size,
         encoder_dilations=encoder_dilations,
-        encoder_dropout=encoder_dropout,
-    ).to(device)
+        encoder_dropout=encoder_dropout).to(device)
     template_state = template.state_dict()
     models = {}
     for ticker in tickers:
@@ -378,25 +311,17 @@ def initialise_asset_actor_critics(
             encoder_channels=encoder_channels,
             encoder_kernel_size=encoder_kernel_size,
             encoder_dilations=encoder_dilations,
-            encoder_dropout=encoder_dropout,
-        ).to(device)
+            encoder_dropout=encoder_dropout).to(device)
         model.load_state_dict(template_state)
         models[ticker] = model
     return models
 
 
-def make_states(
-    features: dict[str, pd.DataFrame],
-    closes: dict[str, pd.Series],
-    scalers: dict[str, StandardScaler],
-    levels: tuple[float, ...],
-    lookback: int,
-    cost_rate: float,
-    turnover_penalty_multiplier: float = 1.0,
-    short_borrow_bps_annual: float = 0.0,
-    rebalance_threshold: float = 0.0,
-    decision_interval: int = 1,
-) -> dict[str, TradingState]:
+def make_states(features: dict[str, pd.DataFrame], closes: dict[str, pd.Series],
+                scalers: dict[str, StandardScaler], levels: tuple[float, ...], lookback: int,
+                cost_rate: float, turnover_penalty_multiplier: float = 1.0,
+                short_borrow_bps_annual: float = 0.0, rebalance_threshold: float = 0.0,
+                decision_interval: int = 1) -> dict[str, TradingState]:
     if turnover_penalty_multiplier < 1.0:
         raise ValueError("turnover_penalty_multiplier must be at least 1.0.")
     return {
@@ -408,22 +333,14 @@ def make_states(
             cost_rate * turnover_penalty_multiplier,
             short_borrow_bps_annual / 10000 / 252,
             rebalance_threshold,
-            decision_interval,
-        )
+            decision_interval)
         for ticker, frame in features.items()
     }
 
 
-def a2c_gradient(
-    model: ActorCritic,
-    state: TradingState,
-    rollout_length: int,
-    gamma: float,
-    rng: np.random.Generator,
-    gae_lambda: float = 0.95,
-    entropy_weight: float = 0.01,
-    value_weight: float = 0.5,
-) -> tuple[list[torch.Tensor], float, float]:
+def a2c_gradient(model: ActorCritic, state: TradingState, rollout_length: int, gamma: float,
+                 rng: np.random.Generator, gae_lambda: float = 0.95, entropy_weight: float = 0.01,
+                 value_weight: float = 0.5) -> tuple[list[torch.Tensor], float, float]:
     device = next(model.parameters()).device
     observations, actions, rewards, rollout_values, dones = [], [], [], [], []
     observation = state.observation()
@@ -481,9 +398,7 @@ def a2c_gradient(
     return gradients, float(loss.item()), float(np.mean(rewards))
 
 
-def apply_gradient(
-    model: nn.Module, optimizer: torch.optim.Optimizer, gradients: list[torch.Tensor]
-) -> None:
+def apply_gradient(model: nn.Module, optimizer: torch.optim.Optimizer, gradients: list[torch.Tensor]) -> None:
     optimizer.zero_grad()
     for parameter, gradient in zip(model.parameters(), gradients):
         parameter.grad = gradient.clone()
@@ -491,19 +406,11 @@ def apply_gradient(
 
 
 @torch.no_grad()
-def greedy_asset_positions(
-    model: nn.Module,
-    scaler: StandardScaler,
-    features: pd.DataFrame,
-    context: pd.DataFrame,
-    levels: tuple[float, ...],
-    lookback: int,
-    closes: pd.Series | None = None,
-    cost_rate: float = 0.0,
-    short_borrow_rate: float = 0.0,
-    rebalance_threshold: float = 0.0,
-    decision_interval: int = 1,
-) -> pd.Series:
+def greedy_asset_positions(model: nn.Module, scaler: StandardScaler, features: pd.DataFrame,
+                           context: pd.DataFrame, levels: tuple[float, ...], lookback: int,
+                           closes: pd.Series | None = None, cost_rate: float = 0.0,
+                           short_borrow_rate: float = 0.0, rebalance_threshold: float = 0.0,
+                           decision_interval: int = 1) -> pd.Series:
     model.eval()
     device = next(model.parameters()).device
     combined = pd.concat([context, features])
@@ -522,13 +429,11 @@ def greedy_asset_positions(
             window = np.concatenate([np.repeat(window[:1], lookback - len(window), axis=0), window])
         if step % decision_interval == 0:
             observation = np.concatenate([window.reshape(-1), [current_target]]).astype(
-                np.float32
-            )
+                np.float32)
             network_output = model(torch.tensor(observation, device=device).unsqueeze(0))
             logits = network_output[0] if isinstance(network_output, tuple) else network_output
             action = int(torch.argmax(logits, dim=-1).item())
             current_target = incremental_target(
-                current_target, action, np.asarray(levels, dtype=float)
-            )
+                current_target, action, np.asarray(levels, dtype=float))
         output[date] = current_target
     return pd.Series(output)

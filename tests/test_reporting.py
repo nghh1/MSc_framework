@@ -3,19 +3,11 @@ import json
 import numpy as np
 import pandas as pd
 
-from garl_trading.reporting.visualise import (
-    BASELINE_STYLES,
-    build_report,
-    close_price_matrix,
-    cost_sensitivity_scope,
-    cumulative_seed_summary,
-    display_label,
-    plot_rl_seed_sharpe_distribution,
-    representative_runs,
-    rl_seed_sharpe_rows,
-    trade_timing_summary,
-    training_diagnostic_series,
-)
+from garl_trading.reporting.visualise import (BASELINE_STYLES, build_report, close_price_matrix,
+                                              cost_sensitivity_scope, cumulative_seed_summary,
+                                              display_label, plot_rl_seed_sharpe_distribution,
+                                              representative_runs, rl_seed_sharpe_rows,
+                                              trade_timing_summary, training_diagnostic_series)
 from garl_trading.reporting.visualise import summary as build_summary
 
 
@@ -57,9 +49,8 @@ def test_close_price_matrix_uses_datetime_axis():
         {
             "date": ["2024-01-02", "2024-01-03"],
             "ticker": ["AAA", "AAA"],
-            "close": [100.0, 101.0],
-        }
-    )
+            "close": [100.0, 101.0]
+        })
     closes = close_price_matrix(prices)
     assert isinstance(closes.index, pd.DatetimeIndex)
     assert closes.loc[pd.Timestamp("2024-01-03"), "AAA"] == 101.0
@@ -72,9 +63,8 @@ def test_cumulative_seed_summary_reports_empirical_seed_dispersion():
             "date": list(dates) * 2,
             "repetition": [0] * 3 + [1] * 3,
             "seed": [42] * 3 + [43] * 3,
-            "equity": [100, 110, 121, 100, 90, 81],
-        }
-    )
+            "equity": [100, 110, 121, 100, 90, 81]
+        })
     result = cumulative_seed_summary(frame)
     assert (result["seed_count"] == 2).all()
     assert np.isclose(result.loc[dates[-1], "mean"], 1.01)
@@ -98,9 +88,8 @@ def test_rl_seed_selector_and_distribution_use_final_holdout(tmp_path):
             ],
             "repetition": [0, 0, 1, 2, 3, 0, 0],
             "seed": [42, 42, 43, 44, 45, 42, 42],
-            "sharpe": [0.1, 0.1, 0.3, 0.7, 0.9, 0.2, 0.8],
-        }
-    )
+            "sharpe": [0.1, 0.1, 0.3, 0.7, 0.9, 0.2, 0.8]
+        })
     rows, label = rl_seed_sharpe_rows(metrics)
     assert label == "final holdout"
     assert set(rows["baseline"]) == {"garl_ddal"}
@@ -117,9 +106,8 @@ def test_representative_run_is_observed_seed_nearest_median_sharpe():
             "fold_kind": ["final_holdout"] * 4,
             "repetition": [0, 1, 2, 3],
             "seed": [42, 43, 44, 45],
-            "sharpe": [0.1, 0.3, 0.7, 0.9],
-        }
-    )
+            "sharpe": [0.1, 0.3, 0.7, 0.9]
+        })
     selected = representative_runs(metrics).iloc[0]
     assert selected.seed == 43
     assert selected.sharpe == 0.3
@@ -135,9 +123,8 @@ def test_training_diagnostic_uses_completed_epochs_and_equal_run_weighting():
             "seed": [42, 42, 43, 43, 43],
             "epoch": [0, 0, 0, 1, 99],
             "agent": ["A", "B", "A", "A", "A"],
-            "loss": [1.0, 3.0, 4.0, np.nan, 2.0],
-        }
-    )
+            "loss": [1.0, 3.0, 4.0, np.nan, 2.0]
+        })
     result = training_diagnostic_series(diagnostics, "loss")
     assert result["completed_epoch"].tolist() == [1, 100]
     assert np.isclose(result.iloc[0]["loss"], 3.0)
@@ -152,9 +139,8 @@ def test_cost_sensitivity_uses_one_explicit_evaluation_scope():
             "repetition": [0, 1, 0, 1],
             "seed": [42, 43, 42, 43],
             "cost_bps": [5] * 4,
-            "sharpe": [0.1, 0.3, 0.8, 1.0],
-        }
-    )
+            "sharpe": [0.1, 0.3, 0.8, 1.0]
+        })
     scoped, label = cost_sensitivity_scope(sensitivity)
     assert label == "final holdout (mean across training seeds)"
     assert set(scoped["fold_kind"]) == {"final_holdout"}
@@ -175,9 +161,8 @@ def test_summary_reports_seed_and_fold_uncertainty():
             "gross_exposure": [1.0] * 4,
             "fold": [0, 1, 0, 1],
             "fold_kind": ["walk_forward"] * 4,
-            "repetition": [0] * 4,
-        }
-    )
+            "repetition": [0] * 4
+        })
     result = build_summary(metrics, 0.95)
     assert set(result["baseline"]) == {"A", "B"}
     assert (result["sharpe_ci"] > 0).all()
@@ -188,9 +173,8 @@ def test_final_holdout_interval_is_seed_scoped_and_not_fabricated_for_single_run
         {
             "baseline": ["buy_and_hold", "garl_ddal", "garl_ddal"],
             "fold_kind": ["final_holdout"] * 3,
-            "sharpe": [0.8, 0.5, 0.9],
-        }
-    )
+            "sharpe": [0.8, 0.5, 0.9]
+        })
     result = build_summary(metrics, 0.95).set_index("baseline")
     assert np.isnan(result.loc["buy_and_hold", "sharpe_ci"])
     assert result.loc["buy_and_hold", "interval_basis"] == "not_estimable"
@@ -212,14 +196,12 @@ def test_report_emits_each_dissertation_figure_as_a_separate_file(tmp_path):
             "high": 101.0,
             "low": 99.0,
             "close": 100 * np.cumprod(1 + np.linspace(-0.01, 0.012, len(dates))),
-            "volume": 1_000_000.0,
-        }
-    )
+            "volume": 1_000_000.0
+        })
     prices.to_csv(run_dir / "data" / "prices.csv", index=False)
     (run_dir / "manifest.json").write_text(
         json.dumps({"config": {"execution": {"initial_capital": 100_000}}}),
-        encoding="utf-8",
-    )
+        encoding="utf-8")
 
     metric_rows = []
     equity_rows = []
@@ -243,7 +225,7 @@ def test_report_emits_each_dissertation_figure_as_a_separate_file(tmp_path):
                 "train_start": train_start,
                 "train_end": train_end,
                 "test_start": period[0],
-                "test_end": period[-1],
+                "test_end": period[-1]
             }
             metric_rows.append(
                 {
@@ -259,14 +241,12 @@ def test_report_emits_each_dissertation_figure_as_a_separate_file(tmp_path):
                     "turnover_daily": 0.1,
                     "gross_exposure": 1.0,
                     "cash_exposure": 0.0,
-                    "cost_drag": 0.01,
-                }
-            )
+                    "cost_drag": 0.01
+                })
             for date, value, net_return in zip(period, equity, net_returns, strict=True):
                 equity_rows.append({**metadata, "date": date, "equity": value})
                 position_rows.append(
-                    {**metadata, "date": date, "ticker": "AAA", "position": multiplier}
-                )
+                    {**metadata, "date": date, "ticker": "AAA", "position": multiplier})
                 daily_rows.append(
                     {
                         **metadata,
@@ -275,9 +255,8 @@ def test_report_emits_each_dissertation_figure_as_a_separate_file(tmp_path):
                         "gross_return": net_return + 0.0001,
                         "cost": 0.0001,
                         "turnover": 0.1,
-                        "cash_exposure": 0.0,
-                    }
-                )
+                        "cash_exposure": 0.0
+                    })
                 if baseline == "garl_ddal" and date in {period[1], period[6]}:
                     trade_rows.append(
                         {
@@ -288,12 +267,10 @@ def test_report_emits_each_dissertation_figure_as_a_separate_file(tmp_path):
                             "target_position": 1.0 if date == period[1] else 0.0,
                             "executed_change": 1.0 if date == period[1] else -1.0,
                             "execution_price": float(
-                                prices.loc[prices["date"] == date, "close"].iloc[0]
-                            ),
+                                prices.loc[prices["date"] == date, "close"].iloc[0]),
                             "transaction_cost": 0.0007,
-                            "short_borrow_cost": 0.0,
-                        }
-                    )
+                            "short_borrow_cost": 0.0
+                        })
     pd.DataFrame(metric_rows).to_csv(run_dir / "metrics.csv", index=False)
     pd.DataFrame(equity_rows).to_csv(run_dir / "equity.csv", index=False)
     pd.DataFrame(position_rows).to_csv(run_dir / "positions.csv", index=False)
@@ -311,9 +288,8 @@ def test_report_emits_each_dissertation_figure_as_a_separate_file(tmp_path):
                 "fold": 1,
                 "fold_kind": "final_holdout",
                 "repetition": 0,
-                "seed": 42,
-            }
-        )
+                "seed": 42
+            })
     pd.DataFrame(prediction_rows).to_csv(run_dir / "predictions.csv", index=False)
 
     build_report(run_dir)
@@ -344,21 +320,19 @@ def test_report_emits_each_dissertation_figure_as_a_separate_file(tmp_path):
 def test_trade_timing_summary_uses_executed_trade_direction():
     dates = pd.bdate_range("2024-01-02", periods=30)
     prices = pd.DataFrame(
-        {"date": dates, "ticker": "AAA", "close": np.arange(100.0, 130.0)}
-    )
+        {"date": dates, "ticker": "AAA", "close": np.arange(100.0, 130.0)})
     metadata = {
         "baseline": "garl_ddal",
         "fold": 1,
         "fold_kind": "final_holdout",
         "repetition": 0,
-        "seed": 42,
+        "seed": 42
     }
     trades = pd.DataFrame(
         [
             {**metadata, "date": dates[20], "ticker": "AAA", "executed_change": 1.0},
             {**metadata, "date": dates[22], "ticker": "AAA", "executed_change": -1.0},
-        ]
-    )
+        ])
     result = trade_timing_summary(trades, prices).set_index("side")
     assert set(result.index) == {"buy", "sell"}
     assert result.loc["buy", "directional_hit_rate_5"] == 1.0

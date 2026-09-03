@@ -22,7 +22,7 @@ def test_all_supervised_models_fit_and_emit_finite_positions():
         "random_forest": {"n_estimators": 10, "min_samples_leaf": 2},
         "lstm": {"lookback": 5, "hidden": 16, "epochs": 1, "device": "cpu"},
         "tcn": {"lookback": 5, "hidden": 16, "epochs": 1, "device": "cpu"},
-        "transformer": {"lookback": 5, "hidden": 16, "epochs": 1, "device": "cpu"},
+        "transformer": {"lookback": 5, "hidden": 16, "epochs": 1, "device": "cpu"}
     }
     for name, params in parameters.items():
         model = create_forecaster(name, seed=4, **params)
@@ -30,8 +30,7 @@ def test_all_supervised_models_fit_and_emit_finite_positions():
         positions = model.predict_positions(
             features.iloc[test],
             context=context,
-            realised_targets=targets.iloc[test],
-        )
+            realised_targets=targets.iloc[test])
         assert len(positions) == len(test)
         assert np.isfinite(positions).all()
         assert positions.abs().max() <= 1
@@ -39,8 +38,7 @@ def test_all_supervised_models_fit_and_emit_finite_positions():
 
 def test_supervised_positions_follow_constrained_mean_variance_rule():
     model = create_forecaster(
-        "random_forest", seed=4, n_estimators=1, risk_aversion=10.0
-    )
+        "random_forest", seed=4, n_estimators=1, risk_aversion=10.0)
     model.return_variance = 0.0004
     predictions = pd.Series([0.001, -0.01, np.nan])
     positions = model.positions_from_predictions(predictions)
@@ -61,11 +59,9 @@ def test_rolling_arimax_assimilates_observations_between_parameter_refits():
     low_first_return.iloc[0] = -0.25
     high_first_return.iloc[0] = 0.25
     low_forecast = model.predict_returns(
-        features.iloc[test], realised_targets=low_first_return
-    )
+        features.iloc[test], realised_targets=low_first_return)
     high_forecast = model.predict_returns(
-        features.iloc[test], realised_targets=high_first_return
-    )
+        features.iloc[test], realised_targets=high_first_return)
 
     assert np.isclose(low_forecast.iloc[0], high_forecast.iloc[0])
     assert not np.isclose(low_forecast.iloc[1], high_forecast.iloc[1])
@@ -81,8 +77,7 @@ def test_rolling_arimax_delays_five_day_target_assimilation():
     context = ModelContext(
         features.iloc[context_positions],
         targets.iloc[context_positions],
-        target_horizon=5,
-    )
+        target_horizon=5)
     model = RollingARIMAX(p=1, d=0, q=0, trend="n", window=90, refit_every=20)
     model.fit(features.iloc[train], targets.iloc[train])
 

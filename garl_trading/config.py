@@ -133,14 +133,12 @@ class FrameworkConfig:
         if self.models.rl_encoder_channels < 1 or self.models.rl_encoder_kernel_size < 2:
             raise ValueError("RL TCN channels must be positive and kernel size must be >= 2.")
         if not self.models.rl_encoder_dilations or any(
-            dilation < 1 for dilation in self.models.rl_encoder_dilations
-        ):
+            dilation < 1 for dilation in self.models.rl_encoder_dilations):
             raise ValueError("RL TCN dilations must be non-empty positive integers.")
         if not 0 <= self.models.rl_encoder_dropout < 1:
             raise ValueError("RL TCN dropout must lie in [0, 1).")
         receptive_field = 1 + (self.models.rl_encoder_kernel_size - 1) * sum(
-            self.models.rl_encoder_dilations
-        )
+            self.models.rl_encoder_dilations)
         if receptive_field < self.models.lookback:
             raise ValueError("RL TCN receptive field must cover the complete lookback window.")
         if self.models.rollout_length < 2 or not 0 < self.models.gamma <= 1:
@@ -153,8 +151,7 @@ class FrameworkConfig:
             raise ValueError("turnover_penalty_multiplier must be at least 1.")
         if self.models.early_stopping_patience < 0 or self.models.minimum_train_epochs < 1:
             raise ValueError(
-                "Early-stopping patience must be non-negative and minimum epochs positive."
-            )
+                "Early-stopping patience must be non-negative and minimum epochs positive.")
         if self.models.early_stopping_min_delta < 0:
             raise ValueError("early_stopping_min_delta cannot be negative.")
         if not 0 <= self.models.garl_share_after_fraction < 1:
@@ -171,8 +168,7 @@ class FrameworkConfig:
                 self.execution.transaction_cost_bps,
                 self.execution.slippage_bps,
                 self.execution.short_borrow_bps_annual,
-            )
-        ):
+            )):
             raise ValueError("Execution costs cannot be negative.")
         if not 0 <= self.execution.rebalance_threshold < 2:
             raise ValueError("rebalance_threshold must lie in [0, 2).")
@@ -190,8 +186,7 @@ class FrameworkConfig:
             raise ValueError("Position levels must lie in [-1, 1].")
         if tuple(levels) != (-1.0, 0.0, 1.0):
             raise ValueError(
-                "Incremental RL actions require position_levels = [-1.0, 0.0, 1.0]."
-            )
+                "Incremental RL actions require position_levels = [-1.0, 0.0, 1.0].")
         if self.tuning.objective not in {"sharpe", "sortino", "calmar", "total_return"}:
             raise ValueError("Unsupported tuning objective.")
         if not set(self.reporting.formats).issubset({"png", "csv", "md"}):
@@ -205,7 +200,7 @@ SECTIONS: dict[str, type] = {
     "execution": ExecutionConfig,
     "models": ModelsConfig,
     "tuning": TuningConfig,
-    "reporting": ReportingConfig,
+    "reporting": ReportingConfig
 }
 
 

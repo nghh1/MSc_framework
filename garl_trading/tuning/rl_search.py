@@ -8,14 +8,8 @@ import pandas as pd
 
 from garl_trading.backtest import run_portfolio
 from garl_trading.garl import train_garl_ddal, train_selective_garl_ddal
-from garl_trading.rl import (
-    train_independent_a2c,
-    train_independent_dqn,
-    train_independent_ppo,
-    train_joint_a2c,
-    train_joint_dqn,
-    train_joint_ppo,
-)
+from garl_trading.rl import (train_independent_a2c, train_independent_dqn, train_independent_ppo,
+                             train_joint_a2c, train_joint_dqn, train_joint_ppo)
 
 
 def rl_candidate_profiles(name: str, learning_rate: float) -> list[dict[str, float | int]]:
@@ -27,7 +21,7 @@ def rl_candidate_profiles(name: str, learning_rate: float) -> list[dict[str, flo
             {
                 "learning_rate": rates[index % 3],
                 "entropy_weight": entropy[index // 3],
-                "turnover_penalty_multiplier": 2.0,
+                "turnover_penalty_multiplier": 2.0
             }
             for index in range(9)
         ]
@@ -37,7 +31,7 @@ def rl_candidate_profiles(name: str, learning_rate: float) -> list[dict[str, flo
             {
                 "learning_rate": rates[index % 3],
                 "clip_epsilon": clipping[index // 3],
-                "turnover_penalty_multiplier": 2.0,
+                "turnover_penalty_multiplier": 2.0
             }
             for index in range(9)
         ]
@@ -49,7 +43,7 @@ def rl_candidate_profiles(name: str, learning_rate: float) -> list[dict[str, flo
                 "learning_rate": rates[index % 3],
                 "epsilon_decay_fraction": exploration[index // 3],
                 "target_update_interval": target_intervals[(index + index // 3) % 3],
-                "turnover_penalty_multiplier": 2.0,
+                "turnover_penalty_multiplier": 2.0
             }
             for index in range(9)
         ]
@@ -60,7 +54,7 @@ def rl_candidate_profiles(name: str, learning_rate: float) -> list[dict[str, flo
                 "learning_rate": rates[index % 3],
                 "entropy_weight": entropy[index // 3],
                 "pool_size": 3,
-                "turnover_penalty_multiplier": 2.0,
+                "turnover_penalty_multiplier": 2.0
             }
             for index in range(9)
         ]
@@ -73,48 +67,25 @@ def rl_candidate_profiles(name: str, learning_rate: float) -> list[dict[str, flo
                 "alignment_threshold": thresholds[index // 3],
                 "peer_mix": 0.5,
                 "pool_size": 3,
-                "turnover_penalty_multiplier": 2.0,
+                "turnover_penalty_multiplier": 2.0
             }
             for index in range(9)
         ]
     raise KeyError(name)
 
 
-def tune_rl_policy(
-    name: str,
-    features: dict[str, pd.DataFrame],
-    closes: dict[str, pd.Series],
-    trials: int,
-    seed: int,
-    levels: tuple[float, ...],
-    lookback: int,
-    rollout_length: int,
-    final_epochs: int,
-    learning_rate: float,
-    gamma: float,
-    cost_rate: float,
-    initial_capital: float,
-    transaction_cost_bps: float,
-    slippage_bps: float,
-    short_borrow_bps_annual: float,
-    rebalance_threshold: float,
-    decision_interval: int,
-    embargo_bars: int,
-    early_stopping_patience: int,
-    early_stopping_min_delta: float,
-    minimum_train_epochs: int,
-    garl_share_after_fraction: float,
-    garl_share_every: int,
-    garl_pool_size: int,
-    selective_garl_alignment_threshold: float,
-    selective_garl_peer_mix: float,
-    encoder_channels: int = 32,
-    encoder_kernel_size: int = 3,
-    encoder_dilations: tuple[int, ...] = (1, 2, 4, 8),
-    encoder_dropout: float = 0.0,
-    device: str = "auto",
-    objective_metric: str = "sharpe"
-) -> dict:
+def tune_rl_policy(name: str, features: dict[str, pd.DataFrame], closes: dict[str, pd.Series],
+                   trials: int, seed: int, levels: tuple[float, ...], lookback: int,
+                   rollout_length: int, final_epochs: int, learning_rate: float, gamma: float,
+                   cost_rate: float, initial_capital: float, transaction_cost_bps: float,
+                   slippage_bps: float, short_borrow_bps_annual: float, rebalance_threshold: float,
+                   decision_interval: int, embargo_bars: int, early_stopping_patience: int,
+                   early_stopping_min_delta: float, minimum_train_epochs: int,
+                   garl_share_after_fraction: float, garl_share_every: int, garl_pool_size: int,
+                   selective_garl_alignment_threshold: float, selective_garl_peer_mix: float,
+                   encoder_channels: int = 32, encoder_kernel_size: int = 3,
+                   encoder_dilations: tuple[int, ...] = (1, 2, 4, 8), encoder_dropout: float = 0.0,
+                   device: str = "auto", objective_metric: str = "sharpe") -> dict:
     """Tune RL settings on the latest causal inner validation segment."""
     n = len(next(iter(features.values())))
     split = max(lookback + 50, int(n * 0.8))
@@ -132,7 +103,7 @@ def tune_rl_policy(
         "independent_ppo": train_independent_ppo,
         "independent_dqn": train_independent_dqn,
         "garl_ddal": train_garl_ddal,
-        "selective_garl_ddal": train_selective_garl_ddal,
+        "selective_garl_ddal": train_selective_garl_ddal
     }
     trainer = trainers[name]
     train_features = {t: frame.iloc[train_positions] for t, frame in features.items()}
@@ -183,13 +154,11 @@ def tune_rl_policy(
                 early_stopping_patience=min(early_stopping_patience, tune_epochs),
                 early_stopping_min_delta=early_stopping_min_delta,
                 minimum_train_epochs=min(minimum_train_epochs, tune_epochs),
-                **algorithm_parameters,
-            )
+                **algorithm_parameters)
             positions = policy.positions(
                 validation_features,
                 context=context,
-                closes=validation_closes
-            )
+                closes=validation_closes)
             result = run_portfolio(
                 pd.DataFrame(validation_closes),
                 positions,
@@ -198,21 +167,18 @@ def tune_rl_policy(
                 slippage_bps=slippage_bps,
                 short_borrow_bps_annual=short_borrow_bps_annual,
                 rebalance_threshold=rebalance_threshold,
-                decision_interval=decision_interval,
-            )
+                decision_interval=decision_interval)
             score = result.metrics[objective_metric]
             return float(score) if np.isfinite(score) else -10.0
-        except Exception:  # noqa: BLE001 - invalid trial configurations are penalised
+        except Exception: 
             return -10.0
 
     search_space = {"profile": list(range(len(candidates)))}
     study = optuna.create_study(
         direction="maximize",
-        sampler=optuna.samplers.GridSampler(search_space, seed=seed),
-    )
+        sampler=optuna.samplers.GridSampler(search_space, seed=seed))
     study.optimize(
         objective,
         n_trials=min(trials, len(search_space["profile"])),
-        show_progress_bar=False,
-    )
+        show_progress_bar=False)
     return dict(candidates[int(study.best_params["profile"])])

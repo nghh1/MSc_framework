@@ -17,18 +17,16 @@ def test_artifact_store_saves_config_and_market_snapshot(tmp_path):
             "baseline": "garl_ddal",
             "fold": 0,
             "fold_kind": "walk_forward",
-            "seed": 42,
+            "seed": 42
         },
         "ALL",
-        {"learning_rate": 0.0003, "rollout_length": 32},
-    )
+        {"learning_rate": 0.0003, "rollout_length": 32})
     dates = pd.bdate_range("2024-01-02", periods=2)
     store.add_predictions(
         {"baseline": "random_forest", "fold": 0, "fold_kind": "walk_forward"},
         "AAA",
         pd.Series([0.01, -0.02], index=dates),
-        pd.Series([0.02, -0.01], index=dates),
-    )
+        pd.Series([0.02, -0.01], index=dates))
     store.add_result(
         {"baseline": "garl_ddal", "fold": 0, "fold_kind": "walk_forward"},
         {"sharpe": 0.5},
@@ -43,10 +41,8 @@ def test_artifact_store_saves_config_and_market_snapshot(tmp_path):
                 "executed_change": [1.0],
                 "execution_price": [101.0],
                 "transaction_cost": [0.0007],
-                "short_borrow_cost": [0.0],
-            }
-        ),
-    )
+                "short_borrow_cost": [0.0]
+            }))
     store.flush()
     assert (store.path / "manifest.json").exists()
     assert (store.path / "config.toml").exists()
@@ -73,9 +69,7 @@ def test_rl_tcn_receptive_field_must_cover_the_lookback():
         models=ModelsConfig(
             lookback=20,
             rl_encoder_kernel_size=2,
-            rl_encoder_dilations=(1, 2, 4),
-        )
-    )
+            rl_encoder_dilations=(1, 2, 4)))
     with pytest.raises(ValueError, match="receptive field"):
         config.validate()
 

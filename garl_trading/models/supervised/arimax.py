@@ -33,17 +33,12 @@ class StaticARIMAX(ForecastModel):
                 order=self.order,
                 trend=self.trend,
                 enforce_stationarity=False,
-                enforce_invertibility=False,
-            ).fit()
+                enforce_invertibility=False).fit()
         self.set_return_variance(y)
         return self
 
-    def predict_returns(
-        self,
-        features: pd.DataFrame,
-        context: ModelContext | None = None,
-        realised_targets: pd.Series | None = None,
-    ) -> pd.Series:
+    def predict_returns(self, features: pd.DataFrame, context: ModelContext | None = None,
+                        realised_targets: pd.Series | None = None) -> pd.Series:
         if self.result is None:
             raise RuntimeError("Model is not fitted.")
         x = features.loc[:, self.columns].fillna(0.0)
@@ -54,15 +49,8 @@ class StaticARIMAX(ForecastModel):
 class RollingARIMAX(ForecastModel):
     """Causal rolling ARIMAX with identical update behavior in tuning and testing."""
 
-    def __init__(
-        self,
-        p: int = 1,
-        d: int = 0,
-        q: int = 1,
-        trend: str = "c",
-        window: int = 252,
-        refit_every: int = 10,
-    ) -> None:
+    def __init__(self, p: int = 1, d: int = 0, q: int = 1, trend: str = "c", window: int = 252,
+                 refit_every: int = 10) -> None:
         super().__init__()
         self.order = (p, d, q)
         self.trend = effective_trend(d, trend)
@@ -80,12 +68,8 @@ class RollingARIMAX(ForecastModel):
         self.set_return_variance(self.history_y)
         return self
 
-    def predict_returns(
-        self,
-        features: pd.DataFrame,
-        context: ModelContext | None = None,
-        realised_targets: pd.Series | None = None,
-    ) -> pd.Series:
+    def predict_returns(self, features: pd.DataFrame, context: ModelContext | None = None,
+                        realised_targets: pd.Series | None = None) -> pd.Series:
         x_history = self.history_x.copy()
         y_history = self.history_y.copy()
         delay = max(1, context.target_horizon if context is not None else 1)
@@ -115,7 +99,7 @@ class RollingARIMAX(ForecastModel):
                 combined_targets = pd.concat(
                     [
                         context_targets,
-                        observed if observed is not None else pd.Series(index=x_test.index, dtype=float),
+                        observed if observed is not None else pd.Series(index=x_test.index, dtype=float)
                     ]
                 )
                 origin = len(context_features) - delay + i
@@ -125,21 +109,18 @@ class RollingARIMAX(ForecastModel):
                     value = predictions[origin_date]
                 origin_features = combined_features.iloc[[origin]]
                 valid_observation = bool(
-                    np.isfinite(value) and origin_features.notna().all(axis=1).iloc[0]
-                )
+                    np.isfinite(value) and origin_features.notna().all(axis=1).iloc[0])
                 if valid_observation:
                     x_history = pd.concat([x_history, origin_features])
                     y_history = pd.concat(
-                        [y_history, pd.Series([float(value)], index=[origin_date])]
-                    )
+                        [y_history, pd.Series([float(value)], index=[origin_date])])
                 if fitted is not None and valid_observation:
                     with warnings.catch_warnings():
                         warnings.simplefilter("ignore")
                         fitted = fitted.append(
                             np.asarray([float(value)]),
                             exog=origin_features.to_numpy(),
-                            refit=False,
-                        )
+                            refit=False)
             if fitted is None or i % self.refit_every == 0:
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore")
@@ -149,8 +130,7 @@ class RollingARIMAX(ForecastModel):
                         order=self.order,
                         trend=self.trend,
                         enforce_stationarity=False,
-                        enforce_invertibility=False,
-                    ).fit()
+                        enforce_invertibility=False).fit()
             forecast = fitted.get_forecast(steps=1, exog=x_test.loc[[date]].to_numpy())
             predictions[date] = float(np.asarray(forecast.predicted_mean)[0])
         return pd.Series(predictions).reindex(x_test.index)

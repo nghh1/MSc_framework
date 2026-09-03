@@ -22,7 +22,7 @@ class MarketDataset:
         return MarketDataset(
             prices={t: f.loc[index] for t, f in self.prices.items()},
             features={t: f.loc[index] for t, f in self.features.items()},
-            index=index,
+            index=index
         )
 
 

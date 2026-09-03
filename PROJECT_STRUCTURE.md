@@ -101,7 +101,7 @@ reconstructed framework. The framework itself is:
 | File | Function |
 |---|---|
 | `data/providers.py` | Downloads adjusted real OHLCV data from Yahoo Finance, uses inclusive requested end dates, normalizes columns/indexes, and validates prices. It contains no synthetic provider. |
-| `data/features.py` | Builds causal momentum, trend, ADX(14), ROC(20), oscillator, volatility, volume, and OBV indicators plus the next-bar return target. |
+| `data/features.py` | Builds causal momentum, trend, ADX(14), ROC(20), oscillator, volatility, volume, and OBV indicators plus the forward-return target for the configured horizon. |
 | `data/dataset.py` | Creates the aligned multi-stock dataset and removes all feature warm-up rows before folds are computed. |
 
 ### Validation and execution
@@ -242,7 +242,7 @@ results/<experiment-name>-<UTC-run-id>/
 | `positions.csv` | Long-form target position for every date, ticker, baseline, fold, repetition, and seed. |
 | `equity.csv` | Long-form net portfolio equity curve for every evaluation run. |
 | `daily_returns.csv` | Net and gross returns, explicit cost, turnover, and cash exposure by date for every evaluation run. |
-| `predictions.csv` | Out-of-sample predicted and actual next-day returns by supervised model, stock, date, and fold. |
+| `predictions.csv` | Out-of-sample predicted and realised forward returns by supervised model, stock, date, and fold. |
 | `training_diagnostics.csv` | Per-epoch RL reward/loss diagnostics, stopping decisions, and GARL queue/sharing events. |
 | `tuning_parameters.csv` | Selected supervised parameters by stock and selected portfolio-level RL parameters by evaluation fold. |
 | `failures.csv` | Any failed baseline/fold/seed and its exception; header-only when no failures occur. |

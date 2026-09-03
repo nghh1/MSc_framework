@@ -27,9 +27,8 @@ def normalise(frame: pd.DataFrame, ticker: str) -> pd.DataFrame:
     return frame
 
 
-def download_yahoo(
-    tickers: Iterable[str], start: str, end: str, adjust_prices: bool = True, retries: int = 3
-) -> dict[str, pd.DataFrame]:
+def download_yahoo(tickers: Iterable[str], start: str, end: str, adjust_prices: bool = True,
+                   retries: int = 3) -> dict[str, pd.DataFrame]:
     inclusive_end = (pd.Timestamp(end) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
     result: dict[str, pd.DataFrame] = {}
     for ticker in tickers:
@@ -42,8 +41,7 @@ def download_yahoo(
                     end=inclusive_end,
                     auto_adjust=adjust_prices,
                     progress=False,
-                    threads=False,
-                )
+                    threads=False)
                 result[ticker] = normalise(raw, ticker)
                 break
             except Exception as exc:  # noqa: BLE001 - retry transient vendor/parser failures
@@ -54,7 +52,5 @@ def download_yahoo(
     return result
 
 
-def load_market_data(
-    tickers: Iterable[str], start: str, end: str, adjust_prices: bool = True
-) -> dict[str, pd.DataFrame]:
+def load_market_data(tickers: Iterable[str], start: str, end: str, adjust_prices: bool = True) -> dict[str, pd.DataFrame]:
     return download_yahoo(tickers, start, end, adjust_prices=adjust_prices)

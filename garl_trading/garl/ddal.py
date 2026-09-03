@@ -13,14 +13,8 @@ import numpy as np
 import pandas as pd
 import torch
 
-from garl_trading.rl.core import (
-    RewardEarlyStopper,
-    a2c_gradient,
-    apply_gradient,
-    fit_feature_scalers,
-    initialise_asset_actor_critics,
-    make_states,
-)
+from garl_trading.rl.core import (RewardEarlyStopper, a2c_gradient, apply_gradient,
+                                  fit_feature_scalers, initialise_asset_actor_critics, make_states)
 from garl_trading.rl.trainers import RLPolicySet
 from garl_trading.utils import resolve_torch_device
 
@@ -43,9 +37,7 @@ def weighted_average(pieces: list[GradientPiece]) -> list[torch.Tensor]:
     ]
 
 
-def gradient_cosine_similarity(
-    first: list[torch.Tensor], second: list[torch.Tensor]
-) -> float:
+def gradient_cosine_similarity(first: list[torch.Tensor], second: list[torch.Tensor]) -> float:
     """Cosine similarity between two complete model-gradient vectors."""
     dot = sum(float(torch.sum(left * right).item()) for left, right in zip(first, second))
     first_norm = np.sqrt(sum(float(torch.sum(value.square()).item()) for value in first))
@@ -54,13 +46,10 @@ def gradient_cosine_similarity(
     return dot / denominator if denominator > 0 else 0.0
 
 
-def selective_weighted_average(
-    local: GradientPiece,
-    pieces: list[GradientPiece],
-    alignment_threshold: float = 0.05,
-    peer_mix: float = 0.5,
-) -> tuple[list[torch.Tensor], dict[str, float | int]]:
-    """Blend a local anchor with positively relevant and aligned peer gradients.
+def selective_weighted_average(local: GradientPiece, pieces: list[GradientPiece],
+                               alignment_threshold: float = 0.05, peer_mix: float = 0.5) -> tuple[list[torch.Tensor], dict[str, float | int]]:
+    """
+    Blend a local anchor with positively relevant and aligned peer gradients.
 
     Accepted peers retain DDAL's equal experience/relevance weighting, with cosine
     alignment acting as an additional receiver-side confidence weight. The convex
@@ -86,7 +75,7 @@ def selective_weighted_average(
         "mean_accepted_alignment": (
             float(np.mean(accepted_alignments)) if accepted_alignments else 0.0
         ),
-        "local_gradient_weight": 1.0,
+        "local_gradient_weight": 1.0
     }
     if not accepted or peer_mix == 0:
         return [gradient.clone() for gradient in local.gradients], diagnostics
@@ -100,8 +89,7 @@ def selective_weighted_average(
     peer_average = [
         sum(
             float(weight) * piece.gradients[index]
-            for weight, (piece, _) in zip(peer_weights, accepted)
-        )
+            for weight, (piece, _) in zip(peer_weights, accepted))
         for index in range(len(local.gradients))
     ]
     diagnostics["local_gradient_weight"] = 1.0 - peer_mix
@@ -133,9 +121,7 @@ def positive_return_relevance(closes: dict[str, pd.Series]) -> dict[tuple[str, s
     }
 
 
-def latest_peer_pieces(
-    queue: list[GradientPiece], pool_size: int | None
-) -> list[GradientPiece]:
+def latest_peer_pieces(queue: list[GradientPiece], pool_size: int | None) -> list[GradientPiece]:
     """Consume at most the newest queued gradient from each source agent."""
     newest: dict[str, GradientPiece] = {}
     for piece in queue:
@@ -147,38 +133,19 @@ def latest_peer_pieces(
     return selected if pool_size is None else selected[:pool_size]
 
 
-def train_garl_ddal(
-    features: dict[str, pd.DataFrame],
-    closes: dict[str, pd.Series],
-    levels: tuple[float, ...],
-    lookback: int,
-    epochs: int,
-    rollout_length: int,
-    learning_rate: float,
-    gamma: float,
-    cost_rate: float,
-    seed: int,
-    device: str = "auto",
-    encoder_channels: int = 32,
-    encoder_kernel_size: int = 3,
-    encoder_dilations: tuple[int, ...] = (1, 2, 4, 8),
-    encoder_dropout: float = 0.0,
-    gae_lambda: float = 0.95,
-    entropy_weight: float = 0.01,
-    turnover_penalty_multiplier: float = 1.0,
-    share_after_fraction: float = 0.3,
-    share_every: int = 4,
-    pool_size: int | None = None,
-    short_borrow_bps_annual: float = 0.0,
-    rebalance_threshold: float = 0.0,
-    decision_interval: int = 1,
-    early_stopping_patience: int = 15,
-    early_stopping_min_delta: float = 1e-4,
-    minimum_train_epochs: int = 30,
-    selective: bool = False,
-    alignment_threshold: float = 0.05,
-    selective_peer_mix: float = 0.5,
-) -> RLPolicySet:
+def train_garl_ddal(features: dict[str, pd.DataFrame], closes: dict[str, pd.Series],
+                    levels: tuple[float, ...], lookback: int, epochs: int, rollout_length: int,
+                    learning_rate: float, gamma: float, cost_rate: float, seed: int,
+                    device: str = "auto", encoder_channels: int = 32, encoder_kernel_size: int = 3,
+                    encoder_dilations: tuple[int, ...] = (1, 2, 4, 8), encoder_dropout: float = 0.0,
+                    gae_lambda: float = 0.95, entropy_weight: float = 0.01,
+                    turnover_penalty_multiplier: float = 1.0, share_after_fraction: float = 0.3,
+                    share_every: int = 4, pool_size: int | None = None,
+                    short_borrow_bps_annual: float = 0.0, rebalance_threshold: float = 0.0,
+                    decision_interval: int = 1, early_stopping_patience: int = 15,
+                    early_stopping_min_delta: float = 1e-4, minimum_train_epochs: int = 30,
+                    selective: bool = False, alignment_threshold: float = 0.05,
+                    selective_peer_mix: float = 0.5) -> RLPolicySet:
     """
     Deterministic event-driven simulation of decentralised asynchronous DDAL queues.
 
@@ -195,8 +162,7 @@ def train_garl_ddal(
         turnover_penalty_multiplier=turnover_penalty_multiplier,
         short_borrow_bps_annual=short_borrow_bps_annual,
         rebalance_threshold=rebalance_threshold,
-        decision_interval=decision_interval,
-    )
+        decision_interval=decision_interval)
     observation_size = features[tickers[0]].shape[1] * lookback + 1
     models = initialise_asset_actor_critics(
         tickers,
@@ -208,8 +174,7 @@ def train_garl_ddal(
         encoder_channels=encoder_channels,
         encoder_kernel_size=encoder_kernel_size,
         encoder_dilations=encoder_dilations,
-        encoder_dropout=encoder_dropout,
-    )
+        encoder_dropout=encoder_dropout)
     optimizers = {
         ticker: torch.optim.Adam(models[ticker].parameters(), lr=learning_rate)
         for ticker in tickers
@@ -231,8 +196,7 @@ def train_garl_ddal(
     diagnostics: list[dict] = []
     stoppers = {
         ticker: RewardEarlyStopper(
-            early_stopping_patience, early_stopping_min_delta, minimum_train_epochs
-        )
+            early_stopping_patience, early_stopping_min_delta, minimum_train_epochs)
         for ticker in tickers
     }
     reward_history: dict[str, list[float]] = {ticker: [] for ticker in tickers}
@@ -249,8 +213,7 @@ def train_garl_ddal(
             gamma=gamma**decision_interval,
             rng=randoms[ticker],
             gae_lambda=gae_lambda,
-            entropy_weight=entropy_weight,
-        )
+            entropy_weight=entropy_weight)
         shared_update = False
         selection_diagnostics: dict[str, float | int] = {}
         update_kind = "local"
@@ -277,16 +240,14 @@ def train_garl_ddal(
                         local_piece,
                         chosen,
                         alignment_threshold=alignment_threshold,
-                        peer_mix=selective_peer_mix,
-                    )
+                        peer_mix=selective_peer_mix)
                     apply_gradient(models[ticker], optimizers[ticker], averaged)
                     shared_update = bool(selection_diagnostics["peer_accepted"])
                 else:
                     apply_gradient(
                         models[ticker],
                         optimizers[ticker],
-                        weighted_average([local_piece, *chosen]),
-                    )
+                        weighted_average([local_piece, *chosen]))
                     shared_update = True
                 update_kind = "shared" if shared_update else "local"
                 has_shared_update[ticker] |= shared_update
@@ -303,7 +264,7 @@ def train_garl_ddal(
                 "shared_update": shared_update,
                 "update_kind": update_kind,
                 "checkpoint_eligible": has_shared_update[ticker],
-                **selection_diagnostics,
+                **selection_diagnostics
             }
         )
         reward_history[ticker].append(reward)
@@ -312,15 +273,13 @@ def train_garl_ddal(
             epoch,
             smoothed,
             models[ticker],
-            checkpoint_eligible=has_shared_update[ticker],
-        ):
+            checkpoint_eligible=has_shared_update[ticker]):
             diagnostics[-1].update(
                 {
                     "early_stopped": True,
                     "best_epoch": stoppers[ticker].best_epoch,
-                    "stop_epoch": stoppers[ticker].stop_epoch,
-                }
-            )
+                    "stop_epoch": stoppers[ticker].stop_epoch
+                })
             stoppers[ticker].restore(models[ticker])
             local_epochs[ticker] = epochs
             continue
@@ -332,8 +291,7 @@ def train_garl_ddal(
                     simulation_time + float(scheduler.exponential(pace[ticker])),
                     event_number,
                     ticker,
-                )
-            )
+                ))
             event_number += 1
     for ticker in tickers:
         stoppers[ticker].restore(models[ticker])
@@ -348,21 +306,15 @@ def train_garl_ddal(
         short_borrow_bps_annual / 10000 / 252,
         diagnostics,
         rebalance_threshold,
-        decision_interval,
-    )
+        decision_interval)
 
 
-def train_selective_garl_ddal(
-    *args,
-    alignment_threshold: float = 0.05,
-    peer_mix: float = 0.5,
-    **kwargs,
-) -> RLPolicySet:
+def train_selective_garl_ddal(*args, alignment_threshold: float = 0.05, peer_mix: float = 0.5,
+                              **kwargs) -> RLPolicySet:
     """DDAL extension that rejects irrelevant or gradient-conflicting peer knowledge."""
     return train_garl_ddal(
         *args,
         selective=True,
         alignment_threshold=alignment_threshold,
         selective_peer_mix=peer_mix,
-        **kwargs,
-    )
+        **kwargs)

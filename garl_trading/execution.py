@@ -6,11 +6,7 @@ import pandas as pd
 MAX_ABS_EXPOSURE = 1.0
 
 
-def thresholded_target(
-    desired: float | pd.Series,
-    current: float | pd.Series,
-    threshold: float,
-) -> float | pd.Series:
+def thresholded_target(desired: float | pd.Series, current: float | pd.Series, threshold: float) -> float | pd.Series:
     """Keep the drifted position when a proposed rebalance is economically immaterial."""
     if threshold < 0:
         raise ValueError("Rebalance threshold cannot be negative.")
@@ -34,11 +30,8 @@ def limited_net_return(value: float | pd.Series) -> float | pd.Series:
     return max(float(value), -1.0)
 
 
-def drifted_exposure(
-    held: float | pd.Series,
-    asset_return: float | pd.Series,
-    gross_return: float | pd.Series,
-) -> float | pd.Series:
+def drifted_exposure(held: float | pd.Series, asset_return: float | pd.Series,
+                     gross_return: float | pd.Series) -> float | pd.Series:
     """Return price-driven pre-trade exposure before the next execution event."""
     wealth_factor = 1.0 + gross_return
     if isinstance(wealth_factor, pd.Series):

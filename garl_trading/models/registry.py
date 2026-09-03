@@ -3,14 +3,8 @@ from __future__ import annotations
 import numpy as np
 
 from .base import ForecastModel
-from .supervised import (
-    LSTMForecaster,
-    RandomForestForecaster,
-    RollingARIMAX,
-    StaticARIMAX,
-    TCNForecaster,
-    TransformerForecaster,
-)
+from .supervised import (LSTMForecaster, RandomForestForecaster, RollingARIMAX, StaticARIMAX,
+                         TCNForecaster, TransformerForecaster)
 
 
 def create_forecaster(name: str, *, seed: int = 42, **params) -> ForecastModel:
@@ -23,7 +17,7 @@ def create_forecaster(name: str, *, seed: int = 42, **params) -> ForecastModel:
         "random_forest": RandomForestForecaster,
         "lstm": LSTMForecaster,
         "tcn": TCNForecaster,
-        "transformer": TransformerForecaster,
+        "transformer": TransformerForecaster
     }
     if name not in constructors:
         raise KeyError(f"Unknown forecaster: {name}")

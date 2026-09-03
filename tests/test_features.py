@@ -15,8 +15,7 @@ def test_future_price_change_does_not_modify_past_features():
     modified = build_features(changed)
     pd.testing.assert_frame_equal(
         original.iloc[:boundary].loc[:, FEATURE_COLUMNS],
-        modified.iloc[:boundary].loc[:, FEATURE_COLUMNS],
-    )
+        modified.iloc[:boundary].loc[:, FEATURE_COLUMNS])
 
 
 def test_dataset_removes_feature_warmup_before_splitting():
@@ -25,8 +24,7 @@ def test_dataset_removes_feature_warmup_before_splitting():
     assert dataset.index[0] == raw["AAA"].index[199]
     assert all(
         np.isfinite(dataset.features[ticker].loc[:, FEATURE_COLUMNS].to_numpy()).all()
-        for ticker in dataset.tickers
-    )
+        for ticker in dataset.tickers)
 
 
 def test_adx_and_roc_are_finite_causal_features():
@@ -43,7 +41,6 @@ def test_five_day_target_and_trailing_range_position_are_causal_and_interpretabl
     features = build_features(raw, horizon=5)
     expected_target = raw["close"].shift(-5) / raw["close"] - 1
     pd.testing.assert_series_equal(
-        features["target_return"], expected_target, check_names=False
-    )
+        features["target_return"], expected_target, check_names=False)
     assert "range_position_20" in FEATURE_COLUMNS
     assert features["range_position_20"].dropna().between(0, 1).all()

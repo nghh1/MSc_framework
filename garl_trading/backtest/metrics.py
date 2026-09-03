@@ -6,15 +6,9 @@ import pandas as pd
 TRADING_DAYS = 252
 
 
-def summarise(
-    equity: pd.Series,
-    returns: pd.Series,
-    positions: pd.DataFrame,
-    turnover: pd.Series,
-    gross_returns: pd.Series | None = None,
-    costs: pd.Series | None = None,
-    cash_exposure: pd.Series | None = None,
-) -> dict[str, float]:
+def summarise(equity: pd.Series, returns: pd.Series, positions: pd.DataFrame, turnover: pd.Series,
+              gross_returns: pd.Series | None = None, costs: pd.Series | None = None,
+              cash_exposure: pd.Series | None = None) -> dict[str, float]:
     volatility = returns.std(ddof=1)
     downside = returns.clip(upper=0)
     downside_deviation = np.sqrt((downside**2).mean())
@@ -63,5 +57,5 @@ def summarise(
         "gross_total_return": gross_total_return,
         "cost_drag": float(gross_total_return - total_return),
         "total_cost": total_cost,
-        "annual_cost": float(costs.mean() * TRADING_DAYS) if costs is not None else 0.0,
+        "annual_cost": float(costs.mean() * TRADING_DAYS) if costs is not None else 0.0
     }

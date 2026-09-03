@@ -47,19 +47,10 @@ class ArtifactStore:
             long_frames.append(item)
         pd.concat(long_frames, ignore_index=True).to_csv(data_dir / "prices.csv", index=False)
 
-    def add_result(
-        self,
-        metadata: dict,
-        metrics: dict,
-        positions: pd.DataFrame,
-        equity: pd.Series,
-        returns: pd.Series | None = None,
-        gross_returns: pd.Series | None = None,
-        costs: pd.Series | None = None,
-        turnover: pd.Series | None = None,
-        cash_exposure: pd.Series | None = None,
-        trades: pd.DataFrame | None = None,
-    ) -> None:
+    def add_result(self, metadata: dict, metrics: dict, positions: pd.DataFrame, equity: pd.Series,
+                   returns: pd.Series | None = None, gross_returns: pd.Series | None = None,
+                   costs: pd.Series | None = None, turnover: pd.Series | None = None,
+                   cash_exposure: pd.Series | None = None, trades: pd.DataFrame | None = None) -> None:
         self.metrics.append({**metadata, **metrics})
         position_frame = positions.stack().rename("position").reset_index()
         position_frame.columns = ["date", "ticker", "position"]
@@ -94,20 +85,15 @@ class ArtifactStore:
     def add_failure(self, **values) -> None:
         self.failures.append(values)
 
-    def add_predictions(
-        self,
-        metadata: dict,
-        ticker: str,
-        predictions: pd.Series,
-        actual_returns: pd.Series,
-    ) -> None:
+    def add_predictions(self, metadata: dict, ticker: str, predictions: pd.Series,
+                        actual_returns: pd.Series) -> None:
         """Save out-of-sample forecasts in return units for diagnostic reporting."""
         frame = pd.DataFrame(
             {
                 "date": predictions.index,
                 "ticker": ticker,
                 "prediction": predictions.to_numpy(),
-                "actual_return": actual_returns.reindex(predictions.index).to_numpy(),
+                "actual_return": actual_returns.reindex(predictions.index).to_numpy()
             }
         )
         for key, value in metadata.items():
@@ -122,9 +108,7 @@ class ArtifactStore:
             frame[key] = value
         self.training_diagnostics.append(frame)
 
-    def add_tuning_parameters(
-        self, metadata: dict, ticker: str, parameters: dict
-    ) -> None:
+    def add_tuning_parameters(self, metadata: dict, ticker: str, parameters: dict) -> None:
         """Retain the selected settings needed to reproduce each fitted model."""
         for parameter, value in sorted(parameters.items()):
             self.tuning_parameters.append(
@@ -135,7 +119,7 @@ class ArtifactStore:
                     "ticker": ticker,
                     "tuning_seed": metadata["seed"],
                     "parameter": parameter,
-                    "value": json.dumps(value, default=str),
+                    "value": json.dumps(value, default=str)
                 }
             )
 
@@ -143,31 +127,24 @@ class ArtifactStore:
         pd.DataFrame(self.metrics).to_csv(self.path / "metrics.csv", index=False)
         if self.positions:
             pd.concat(self.positions, ignore_index=True).to_csv(
-                self.path / "positions.csv", index=False
-            )
+                self.path / "positions.csv", index=False)
         if self.equity:
             pd.concat(self.equity, ignore_index=True).to_csv(self.path / "equity.csv", index=False)
         if self.daily_returns:
             pd.concat(self.daily_returns, ignore_index=True).to_csv(
-                self.path / "daily_returns.csv", index=False
-            )
+                self.path / "daily_returns.csv", index=False)
         if self.trades:
             pd.concat(self.trades, ignore_index=True).to_csv(
-                self.path / "trades.csv", index=False
-            )
+                self.path / "trades.csv", index=False)
         if self.predictions:
             pd.concat(self.predictions, ignore_index=True).to_csv(
-                self.path / "predictions.csv", index=False
-            )
+                self.path / "predictions.csv", index=False)
         if self.training_diagnostics:
             pd.concat(self.training_diagnostics, ignore_index=True).to_csv(
-                self.path / "training_diagnostics.csv", index=False
-            )
+                self.path / "training_diagnostics.csv", index=False)
         if self.tuning_parameters:
             pd.DataFrame(self.tuning_parameters).to_csv(
-                self.path / "tuning_parameters.csv", index=False
-            )
+                self.path / "tuning_parameters.csv", index=False)
         failure_columns = ["baseline", "fold", "repetition", "seed", "error"]
         pd.DataFrame(self.failures, columns=failure_columns).to_csv(
-            self.path / "failures.csv", index=False
-        )
+            self.path / "failures.csv", index=False)
